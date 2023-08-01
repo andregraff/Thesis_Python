@@ -21,7 +21,15 @@ import pandas as pd
 import re 
 
 
- 
+# Define the base case identifiers
+base_cases = {
+    'R_L1':'B2_R_L1_Base_S_0.12_5.9_TS1',
+    'R_L2':'B2_R_L2_Base_S_0.12_5.9_TS1',
+    'O_L1':'B2_O_L1_Base_S_0.12_5.9_TS1',
+    'O_L2':'B2_O_L2_Base_S_0.12_5.9_TS1',
+    }
+    
+
 "#############################################################################"
 "##                            Common Functions                             ##"
 "#############################################################################"
@@ -171,8 +179,9 @@ def rename_idf_files(current_dir):
                 if not os.path.exists(new_name):
                     # Rename the file
                     os.rename(os.path.join(root, file), new_name)
+          
                     
-
+          
 ###############################################################################
 ###                           rename_folders                              ###
 ###############################################################################
@@ -201,31 +210,60 @@ def rename_folders(root, inp, out):
             new_path = os.path.join(root, new_folder_name)
             os.rename(old_path, new_path)
             print(f"Renamed '{folder}' to '{new_folder_name}'")
+            
 
-               
+###############################################################################
+###                        replace_construction_line                        ###
+###############################################################################
+
+def replace_construction_line(file_path):
+    # Read the file and store its lines in a list
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+
+    # Search for the target construction line and replace it wherever it occurs
+    target_line = "    2xGLASS_U2.3_KRYPTON,    !- Construction Name\n"
+    replacement_line = "3xGLASS_U1.0_AIR,    \n"
+    found_at_least_once = False
+
+    for index, line in enumerate(lines):
+        if target_line in line:
+            # Check if 3 lines above contain "FenestrationSurface:Detailed,"
+            if index >= 3 and "  FenestrationSurface:Detailed,\n" in lines[index - 3]:
+                lines[index] = replacement_line
+                found_at_least_once = True
+
+    # Write the modified lines back to the file if any replacements were made
+    if found_at_least_once:
+        with open(file_path, 'w') as file:
+            file.writelines(lines)
+        print("Substitution successful.")
+    else:
+        print("Target construction line not found in the file.")               
+
 
 ###############################################################################
 ###                               Run_idf                               ###
 ###############################################################################
 
 def Run_idf(idf_file, iddfile, epwfile):
-        
-        
-    IDF.setiddname(iddfile)
-    
-    epwfile = epwfile
-       
-        
-    # Get the directory path of the IDF file
-    idf_dir = os.path.dirname(idf_file)
+    try:
+        IDF.setiddname(iddfile)
 
-    # Change the current working directory to the IDF file's directory
-    os.chdir(idf_dir)
+        # Get the directory path of the IDF file
+        idf_dir = os.path.dirname(idf_file)
 
-    # Run the IDF file and save results in the current folder
-    idf = IDF(idf_file, epwfile)
-    idf.run()
-       
+        # Change the current working directory to the IDF file's directory
+        os.chdir(idf_dir)
+
+        # Run the IDF file and save results in the current folder
+        idf = IDF(idf_file, epwfile)
+        idf.run()
+
+    except Exception as e:
+        # Handle any exceptions that might occur during the execution
+        print("An error occurred while running the IDF:")
+        print(e)
 
 ###############################################################################
 ###                             find_KPInumber                              ###
@@ -357,12 +395,42 @@ def retrieve_kpi (eso_path, key_string):
 
     return total_value   #is a float
 
+###############################################################################
+###                        calculate_percentage_diff                        ###
+###############################################################################
 
+# Function to calculate the percentage difference
+def calculate_percentage_diff(df, col_name):
+    'Create a column in the df with the diff % of a column'
+    
+    # Create a copy of the DataFrame to avoid modifying the original DataFrame
+    result_df = df.copy()
+    # For each row in the df
+    for index, row in df.iterrows():
+        # Check if the string part 'use and locality' is in one of the 4 base cases
+        if index[3:7] in base_cases.keys():
+            # Select the matching base case and get the corresponding value
+            base_case = base_cases[index[3:7]]
+            base_value = df.at[base_case, col_name]
+            # Get the current value of the row
+            current_value = row[col_name]
+            # Compare the two values
+            percentage_diff = (current_value - base_value) / base_value * 100
+            # Store the percentage difference in the 'Percentage_difference' column
+            result_df.at[index, 'Percentage_diff'] = percentage_diff.round(2)
+
+        else:
+            # If the current row's index is not found in the base_cases list, store None
+            result_df.at[index, 'Percentage_diff'] = None
+
+    return result_df 
+    
+    
 "###############################################################################"
 "###                                 Main                                    ###"
 "###############################################################################"
 
-def main(run_files=None):
+def main(run_files=False, add_output=None, collect_kpi=False):
     
     '''
     Dictionaries
@@ -394,9 +462,16 @@ def main(run_files=None):
     
 
 
-
     #run this file in the root folder
     base_folder = os.getcwd()
+    
+    df_sorted = None
+    df2_sorted = None
+    top_nvalues_H = None
+    top_nvalues_C = None
+    df_tot = None
+    top_nvalues_tot = None
+    new_perc = None
 
     
     '''
@@ -404,21 +479,23 @@ def main(run_files=None):
     '''
     
     #First of all create a list of all the file paths with an .idf extension
-    list_IDFs_found = search_extensions(base_folder, extension_file = '.idf', create_list=True)
+    list_IDFs_found = search_extensions(base_folder, extension_file = '.idf')
     
     
     '''
     add an output total cooling rate'
     '''
     
-    #define the reference_string where you want to add a new output_line
-    reference_string = "Zone Ideal Loads Zone Sensible Heating Rate"
-    output_line = '  Output:Variable,*,Zone Ideal Loads Zone Total Cooling Rate,Hourly;\n'
-    
-    #for each idf file add an output
-    for path_idf in list_IDFs_found:
+    if add_output:
         
-        add_output(path_idf, reference_string, output_line)
+        #define the reference_string where you want to add a new output_line
+        reference_string = "Zone Ideal Loads Zone Sensible Heating Rate"
+        output_line = '  Output:Variable,*,Zone Ideal Loads Zone Total Cooling Rate,Hourly;\n'
+        
+        #for each idf file add an output
+        for path_idf in list_IDFs_found:
+            
+            add_output(path_idf, reference_string, output_line)
 
     
     '''
@@ -449,102 +526,153 @@ def main(run_files=None):
     Create second list (eso)
     ''' 
     #Create a list of all .eso files generated with the Run_idf function    
-    list_ESOs_found = search_extensions(base_folder, extension_file = '.eso', create_list= True) 
+    list_ESOs_found = search_extensions(base_folder, extension_file = '.eso') 
     
     
     '''
     KPI section
     ''' 
-    
-    'heating'
-    
-    #for each esofile in the list, retrieve the KPI values and create a df
-    df = pd.DataFrame()
-    string_KPI = 'Zone Ideal Loads Zone Sensible Heating Rate'
-    
-    for esofile in list_ESOs_found:
+    if collect_kpi:
         
-        #create a df with the sum values of the retrieved KPI
-        current_df = collect_KPIvalues(esofile, string_KPI)
+        'heating'
         
-        #extract the folder name to identify the "sum values"
-        folder_name = os.path.basename(os.path.dirname(esofile))
+        #for each esofile in the list, retrieve the KPI values and create a df
+        df = pd.DataFrame()
+        string_KPI = 'Zone Ideal Loads Zone Sensible Heating Rate'
         
-        # Add a new column with the folder name
-        current_df['folder_name'] = folder_name
+        for esofile in list_ESOs_found:
+            
+            #create a df with the sum values of the retrieved KPI
+            current_df = collect_KPIvalues(esofile, string_KPI)
+            
+            #extract the folder name to identify the "sum values"
+            folder_name = os.path.basename(os.path.dirname(esofile))
+            
+            # Add a new column with the folder name
+            current_df['folder_name'] = folder_name
+            
+            #create a df with the values of all the folders
+            df = pd.concat([df, current_df], ignore_index= True)
         
-        #create a df with the values of all the folders
-        df = pd.concat([df, current_df], ignore_index= True)
-    
-    #sort the dataframe from the lowest to the highest
-    df_sorted = df.sort_values(by = "sum_value", ascending = True)
-    
-    #take the top "n" values
-    
-    n = 5
-    top_nvalues_H = df_sorted.head(n)
-    print(top_nvalues_H)
-    
-    
-    
-    'cooling'
-    
-    #for each esofile in the list, retrieve the KPI values and create a df
-    df2 = pd.DataFrame()
-    string_KPI2 = 'Zone Ideal Loads Zone Total Cooling Rate'
-    
-    for esofile in list_ESOs_found:
+        #sort the dataframe from the lowest to the highest
+        df_sorted = df.sort_values(by = "sum_value", ascending = True)
         
-        #create a df with the sum values of the retrieved KPI
-        current_df2 = collect_KPIvalues(esofile, string_KPI2)
+        #take the top "n" values
         
-        #extract the folder name to identify the "sum values"
-        folder_name = os.path.basename(os.path.dirname(esofile))
+        n = 5
+        top_nvalues_H = df_sorted.head(n)
+        print(top_nvalues_H)
+          
+        'cooling'
         
-        # Add a new column with the folder name
-        current_df2['folder_name'] = folder_name
+        #for each esofile in the list, retrieve the KPI values and create a df
+        df2 = pd.DataFrame()
+        string_KPI2 = 'Zone Ideal Loads Zone Total Cooling Rate'
         
-        #create a df with the values of all the folders
-        df2 = pd.concat([df2, current_df2], ignore_index= True)
+        for esofile in list_ESOs_found:
+            
+            #create a df with the sum values of the retrieved KPI
+            current_df2 = collect_KPIvalues(esofile, string_KPI2)
+            
+            #extract the folder name to identify the "sum values"
+            folder_name = os.path.basename(os.path.dirname(esofile))
+            
+            # Add a new column with the folder name
+            current_df2['folder_name'] = folder_name
+            
+            #create a df with the values of all the folders
+            df2 = pd.concat([df2, current_df2], ignore_index= True)
+        
+        #sort the dataframe from the lowest to the highest
+        df2_sorted = df2.sort_values(by = "sum_value", ascending = True)
+        
+        #take the top "n" values
+        
+        n = 5
+        top_nvalues_C = df2_sorted.head(n)
+        print(top_nvalues_C)
+           
+        'Total'
+        
+        df_tot = pd.concat([df, df2], axis=1, ignore_index=True)
+        #replace the current df_tot setting inplace = true
+        df_tot.rename(columns={0:'value_heat', 1:'Heating', 2:'value_cool', 3:'Cooling'}, inplace=True)
     
-    #sort the dataframe from the lowest to the highest
-    df2_sorted = df2.sort_values(by = "sum_value", ascending = True)
+        #add a new column 'total' that is the sum of the heat and cool
+        df_tot['Total_consumption'] = df_tot['value_heat'] + df_tot['value_cool']
+        
+        #sort by total consumptions from min to max and take the top 5 results
+        top_nvalues_tot = df_tot.sort_values(by = 'Total_consumption')
+       
+        'export step'
+        
+        #export xlsx files in an output folder
+        os.chdir(base_folder)
+        
+        #create a folder to store the outputs
+        dir_csv = 'csv_outputs'
+        
+        if not os.path.exists(dir_csv):
+            os.makedirs(dir_csv)
+            print("Directory '% s' created" % dir_csv)
+        else:
+            print("Directory '% s' already exists" % dir_csv)
     
-    #take the top "n" values
-    
-    n = 5
-    top_nvalues_C = df2_sorted.head(n)
-    print(top_nvalues_C)
-    
-    
-    'Total'
-    
-    df_tot = pd.concat([df, df2], axis=1, ignore_index=True)
-    #replace the current df_tot setting inplace = true
-    df_tot.rename(columns={0:'value_heat', 1:'Heating', 2:'value_cool', 3:'Cooling'}, inplace=True)
-
-    #add a new column 'total' that is the sum of the heat and cool
-    df_tot['Total_consumption'] = df_tot['value_heat'] + df_tot['value_cool']
-    
-    #sort by total consumptions from min to max and take the top 5 results
-    top_nvalues_tot = df_tot.sort_values(by = 'Total_consumption')
-    
-    #export xlsx files in the main dir
+        #change the current directory
+        os.chdir(dir_csv)
+        
+        
+        df_tot.to_csv('results_summary.csv')  
+        top_nvalues_H.to_csv('top_nvalues_H.csv')
+        top_nvalues_tot.to_csv('top_nvalues_total.csv')
+       
+    #return to the current dir
     os.chdir(base_folder)
     
-    df_tot.to_csv('results_summary.csv')  
-    top_nvalues_H.to_csv('top_nvalues_H.csv')
-    top_nvalues_tot.to_csv('top_nvalues_total.csv')
+    'comparison step'
     
-    return df_sorted, df2_sorted, top_nvalues_H, top_nvalues_C, df_tot, top_nvalues_tot
+
+    #read the old thesis results and create a  df
+    old = pd.read_excel('OLD_total.xlsx', index_col='ID_code')
+    old = old.round(2)
+    
+    #clean the new df with all results and leave only total consumptions
+    os.chdir('csv_outputs')
+    new = pd.read_csv('results_summary.csv')
+    new = new.drop(['Unnamed: 0','value_heat','Heating','value_cool'], axis=1)
+    #change column names
+    new = new.set_index('Cooling')
+    new = new.rename_axis('ID_code', axis='index')
+    
+
+    
+    new_perc = calculate_percentage_diff(new, col_name='Total_consumption')
+
+    # Now join the two df old and new
+    final_df = old.join(new_perc)
+    final_df.rename(columns={'En. Totale': 'tot_en(v8.9)', 'Diff. En. Tot. %': 'Diff%', 'Total_consumption': 'tot_en(v22.2)', 'Percentage_diff': 'newDiff%'}, inplace=True)
+
+    
+    
+    #add a new column to final_df with the distance from v8.9 to 22.2
+    final_df['Delta_rel(v22.2-8.9)'] = round((final_df['tot_en(v22.2)'] - final_df['tot_en(v8.9)']) / final_df['tot_en(v8.9)'] *100, 2)
+    
+    final_df['rank_8.9'] =   final_df['tot_en(v8.9)'].rank(ascending=True)
+    final_df['rank_22.2'] =   final_df['tot_en(v22.2)'].rank(ascending=True)
+    final_df['rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9'] # - è salito di posizione
+    
+    
+
+    
+    
+    return df_sorted, df2_sorted, top_nvalues_H, top_nvalues_C, df_tot, top_nvalues_tot, final_df
 
     
 if __name__  == "__main__" :
-    results_heat, results_cool, top_nvalues_C, top_nvalues_H, df_tot, top_nvalues_tot = main()
+    results_heat, results_cool, top_nvalues_C, top_nvalues_H, df_tot, top_nvalues_tot, final_df = main()
     
 
     
   
     
-    
-    
+   
