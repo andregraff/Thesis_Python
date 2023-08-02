@@ -13,6 +13,7 @@ Created on Fri Jun 30 11:20:04 2023
 "##                               Initialization                            ##"
 "#############################################################################"
 
+import matplotlib as mpl
 import os
 from itertools import product
 import fnmatch
@@ -424,8 +425,32 @@ def calculate_percentage_diff(df, col_name):
             result_df.at[index, 'Percentage_diff'] = None
 
     return result_df 
-    
-    
+
+
+
+"#############################################################################"
+"##                              STYLER SECTION                             ##"
+"#############################################################################"
+
+
+def color_negative_red(val):
+    """
+    Takes a scalar and returns a string with
+    the css property `'color: red'` for negative
+    strings, black otherwise.
+    """
+    color = 'red' if val < 0 else 'black'
+    return 'color: %s' % color
+
+#df.style.apply(color_negative_red)
+
+
+
+
+
+
+
+
 "###############################################################################"
 "###                                 Main                                    ###"
 "###############################################################################"
@@ -506,6 +531,8 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         #set the iddfile path 
         iddfile = iddfile = os.path.join(base_folder, 'Energy+.idd')
         
+        os.chdir(r'\#enplus_models')
+        
         #choose to run with palermo or bolzano weater file
         for idf_file in list_IDFs_found:
             
@@ -520,6 +547,8 @@ def main(run_files=False, add_output=None, collect_kpi=False):
                 #Run all the idf files with the run funtion with the right epw
                 epwfile = os.path.join(base_folder,"ITA_Palermo.164050_IWEC.epw")
                 Run_idf(idf_file, iddfile, epwfile)
+            
+            os.chdir(base_folder)
         
 
     '''
@@ -629,7 +658,10 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     #return to the current dir
     os.chdir(base_folder)
     
-    'comparison step'
+    
+    '''
+    Comparison step
+    '''
     
 
     #read the old thesis results and create a  df
@@ -662,8 +694,60 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     final_df['rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9'] # - è salito di posizione
     
     
+    
+    'style step'
+    # Define the CSS styles
+ 
+    # Define the CSS styles for index and column names highlighting
+    header_style = [
+        {
+            "selector": "th",
+            "props": [("font-weight", "bold"), ("background-color", "#b2b2b2")]
+        },
+        {
+            "selector": "th.index_name",
+            "props": [("font-weight", "bold"), ("background-color", "#b2b2b2")]
+        }
+    ]
 
     
+    styled_df = final_df.style.set_caption("En+ comparison table", )
+    
+    styled_df = styled_df.background_gradient(subset=['Delta_rel(v22.2-8.9)'], cmap='RdYlGn')
+    # Apply precision to specific columns 
+    styled_df = styled_df.format({'tot_en(v8.9)': '{:.1f}',
+                                  'Diff%': '{:.2f}',
+                                  'tot_en(v22.2)': '{:.1f}',
+                                  'newDiff%': '{:.2f}',
+                                  'Delta_rel(v22.2-8.9)': '{:.2f}',
+                                  'rank_8.9': '{:.0f}',
+                                  'rank_22.2': '{:.0f}',
+                                  'rank_22.2-8.9': '{:.0f}'})
+
+    
+    # Apply the header styles to the DataFrame
+    styled_df = styled_df.set_table_styles(header_style)
+    
+    os.chdir(base_folder)      
+    #create a folder to store the outputs
+    dir_images = 'images_outputs'   
+    if not os.path.exists(dir_images):
+        os.makedirs(dir_images)
+        print("Directory '% s' created" % dir_images)
+    else:
+        print("Directory '% s' already exists" % dir_images)
+    #change the current directory
+    os.chdir(dir_images)      
+    
+    
+    
+    # Convert the styled DataFrame to HTML representation
+    html = styled_df.to_html()
+    
+    # Save the HTML representation to a file
+    with open("styled_df.html", "w") as fp:
+        fp.write(html)
+        
     
     return df_sorted, df2_sorted, top_nvalues_H, top_nvalues_C, df_tot, top_nvalues_tot, final_df
 
