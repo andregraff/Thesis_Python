@@ -46,4 +46,5 @@ h. Export the styled DataFrame as an image (jpg).
 - Run the Python file. The first time you run the file, set 'run_files=True' to obtain the outputs.
 ```
 5. Results
- 
+
+![Alt Text](images_outputs/styled_df.jpg) 
