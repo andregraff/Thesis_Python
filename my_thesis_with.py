@@ -20,7 +20,9 @@ import fnmatch
 from eppy.modeleditor import IDF
 import pandas as pd
 import re 
+import imgkit
 
+enplus_vers = '(v22.2)'  #change the number
 
 # Define the base case identifiers
 base_cases = {
@@ -266,68 +268,6 @@ def Run_idf(idf_file, iddfile, epwfile):
         print("An error occurred while running the IDF:")
         print(e)
 
-###############################################################################
-###                             find_KPInumber                              ###
-###############################################################################
-
-
-def find_KPInumber(esofile, string_KPI):
-    list_of_KPIs = []  # Store the lines that match the pattern
-    KPI_number = []  # Store the extracted  ID number of the KPI defined by the .eso file
-    
-    with open(esofile) as file:
-        for line in file:
-            
-            if re.search(string_KPI, line, re.IGNORECASE):
-                
-                # Extract the variable number.
-                #\d is the pattern that matches any digit, and + is a quantifier that matches one or more occurrences of the preceding pattern.
-                variable_number = re.findall(r'\d+', line)[0] 
-                list_of_KPIs.append((variable_number, line.strip()))  # Append the line to the list
-                KPI_number.append(variable_number)  # Append the variable number to the list
-    
-    print(KPI_number)  # Print the extracted variable numbers
-    
-    return list_of_KPIs, KPI_number
-
-
-
-
-###############################################################################
-###                            collect_KPIvalues                            ###
-###############################################################################
-
-def collect_KPIvalues(esofile, string_KPI):
-    
-    list_of_KPIs, KPI_number = find_KPInumber(esofile, string_KPI)
-    
-    lines_found = []  # Store the lines that match the variable numbers
-    start_collecting = False
-    
-    with open(esofile) as file:
-        for line in file:
-            if start_collecting:
-                line_elements = line.strip().split(",")
-                if line_elements[0] in KPI_number:  # Check if the variable number matches
-                    lines_found.append(line_elements)  # Append the line as a list of elements
-            elif line.strip() == "End of Data Dictionary":
-                start_collecting = True  # Start collecting lines after "End of Data Dictionary"
-
-    column_value = 'value'
-    df = pd.DataFrame(lines_found, columns=[string_KPI, column_value])  # Create a data frame with the found lines    
-
-    # The 'pd.to_numeric' function is used to convert the column values to numeric type
-    # The 'errors' argument is set to 'coerce' to replace any non-convertible values with 'NaN'
-    # The converted numeric values are then assigned back to the column in the DataFrame
-    df[column_value] = pd.to_numeric(df[column_value], errors='coerce')
-    
-    sum_value = df['value'].sum() / 1000 #[W] to [kW] #####potrei aggiungere un IF per quando nella stringa ho [W]
-    new_df = pd.DataFrame({'sum_value': [sum_value]})
-    
-    
-    return new_df
-
-
 
 ###############################################################################
 ###                               add_output                                ###
@@ -366,36 +306,7 @@ def add_output(path_idf, reference_string, output_line):
     return path_idf, count
 
 
-
-
-def retrieve_kpi (eso_path, key_string):
-    
-    values = []
-
-    # First, let's read the lines from the file and filter out the relevant keys
-    with open(eso_path, "r") as esofile:
-        lines = esofile.readlines()
-    
-    all_keys = [line.split(',')[0] for line in lines if key_string in line]
-    
-    # Now, let's extract the values for the keys we found earlier
-    with open(eso_path, "r") as esofile:
-        lines = esofile.readlines()
-    
-    for line in lines:
-        values_line = line.split(',')
-        if len(values_line) < 3 and values_line[0] in all_keys:
-            values.append(abs(float(values_line[1])))
-    
-    # Calculate the total and divide by 1000
-    total_value = sum(values) / 1000
-    total_value = round(total_value, 1)
-    
-    # Printing the result or using it for further analysis
-    print("Total cooling:", total_value) 
-
-    return total_value   #is a float
-
+            
 ###############################################################################
 ###                        calculate_percentage_diff                        ###
 ###############################################################################
@@ -406,6 +317,8 @@ def calculate_percentage_diff(df, col_name):
     
     # Create a copy of the DataFrame to avoid modifying the original DataFrame
     result_df = df.copy()
+    # Insert a new column to store the diff
+    result_df.insert(result_df.columns.get_loc(col_name)+1, 'diff%_' + col_name, value=0)
     # For each row in the df
     for index, row in df.iterrows():
         # Check if the string part 'use and locality' is in one of the 4 base cases
@@ -416,16 +329,43 @@ def calculate_percentage_diff(df, col_name):
             # Get the current value of the row
             current_value = row[col_name]
             # Compare the two values
-            percentage_diff = (current_value - base_value) / base_value * 100
-            # Store the percentage difference in the 'Percentage_difference' column
-            result_df.at[index, 'Percentage_diff'] = percentage_diff.round(2)
+            percentage_diff = (current_value - base_value) / base_value * 100 # Is a float
+            # Store the percentage difference in the 'Percentage_difference' column on the right of col_name
+            result_df.at[index,'diff%_' + col_name] = percentage_diff.round(2)
 
         else:
             # If the current row's index is not found in the base_cases list, store None
-            result_df.at[index, 'Percentage_diff'] = None
+            result_df.at[index, 'diff%_'+ f'{col_name}'] = None
 
     return result_df 
 
+
+
+###############################################################################
+###                             retrieve_kpi3                               ###
+###############################################################################
+
+def retrieve_kpi(eso_path, key_string):
+    
+    # Read the eso file as a df. Engine c should be faster. Skip lines too long
+    df = pd.read_csv(eso_path,header=None, engine='c', on_bad_lines='skip')
+    # Find the numbers of my key_string
+    all_keys = df.loc[df[3] == (key_string)][0]
+    
+    # Find the boundaries of values
+    end_of_dictionary = df.loc[df[0] == ('End of Data Dictionary')].index[0]+1
+    end_of_data = df.loc[df[0] == ('End of Data')].index[0]
+    
+    # trim the data: take all values between the two rows
+    df_new = df.iloc[end_of_dictionary:end_of_data]
+    # Take only the rows with the key numbers
+    df_trimmed = df_new.loc[df[0].astype(str).isin(all_keys.astype(str))][1].astype(float)
+    #print(df_trimmed)
+    # Make the sum and return a float number   
+    sum_df = df_trimmed.sum() / 1000
+    print(sum_df)
+    
+    return sum_df #is a float64
 
 
 "#############################################################################"
@@ -455,7 +395,11 @@ def color_negative_red(val):
 "###                                 Main                                    ###"
 "###############################################################################"
 
-def main(run_files=False, add_output=None, collect_kpi=False):
+def main(run_files=None, add_output=None, collect_kpi=None):
+    
+    df_AH = None
+    df_AC = None
+    final_df = None    
     
     '''
     Dictionaries
@@ -485,20 +429,9 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         'base_thermal_storage': ['TS1'],
         }
     
-
-
     #run this file in the root folder
     base_folder = os.getcwd()
-    
-    df_sorted = None
-    df2_sorted = None
-    top_nvalues_H = None
-    top_nvalues_C = None
-    df_tot = None
-    top_nvalues_tot = None
-    new_perc = None
-
-    
+        
     '''
     Create first list (idf)
     '''
@@ -526,12 +459,12 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     '''
     run all idf files
     ''' 
-    if run_files == True:
+    if run_files:
         
         #set the iddfile path 
         iddfile = iddfile = os.path.join(base_folder, 'Energy+.idd')
         
-        os.chdir(r'\#enplus_models')
+        os.chdir(r'#enplus_models')
         
         #choose to run with palermo or bolzano weater file
         for idf_file in list_IDFs_found:
@@ -563,101 +496,76 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     ''' 
     if collect_kpi:
         
-        'heating'
-        
-        #for each esofile in the list, retrieve the KPI values and create a df
-        df = pd.DataFrame()
-        string_KPI = 'Zone Ideal Loads Zone Sensible Heating Rate'
-        
-        for esofile in list_ESOs_found:
-            
-            #create a df with the sum values of the retrieved KPI
-            current_df = collect_KPIvalues(esofile, string_KPI)
-            
-            #extract the folder name to identify the "sum values"
-            folder_name = os.path.basename(os.path.dirname(esofile))
-            
-            # Add a new column with the folder name
-            current_df['folder_name'] = folder_name
-            
-            #create a df with the values of all the folders
-            df = pd.concat([df, current_df], ignore_index= True)
-        
-        #sort the dataframe from the lowest to the highest
-        df_sorted = df.sort_values(by = "sum_value", ascending = True)
-        
-        #take the top "n" values
-        
-        n = 5
-        top_nvalues_H = df_sorted.head(n)
-        print(top_nvalues_H)
-          
-        'cooling'
-        
-        #for each esofile in the list, retrieve the KPI values and create a df
-        df2 = pd.DataFrame()
-        string_KPI2 = 'Zone Ideal Loads Zone Total Cooling Rate'
+        'cooling' 
+        # Create an empty dictonary
+        AC = {}
+        string_KPI = 'Zone Ideal Loads Zone Total Cooling Rate [W] !Hourly'
         
         for esofile in list_ESOs_found:
-            
-            #create a df with the sum values of the retrieved KPI
-            current_df2 = collect_KPIvalues(esofile, string_KPI2)
-            
             #extract the folder name to identify the "sum values"
             folder_name = os.path.basename(os.path.dirname(esofile))
-            
-            # Add a new column with the folder name
-            current_df2['folder_name'] = folder_name
-            
-            #create a df with the values of all the folders
-            df2 = pd.concat([df2, current_df2], ignore_index= True)
+            try:
+                #find all the annual values
+                output = retrieve_kpi(esofile, string_KPI) #is a float64
+            except:
+                print(f'Error found in: {folder_name}')
+ 
+            # Fill the dict
+            AC[folder_name] = output
+            # Convert the dictionary to a DataFrame with index=folder_name
+            df_AC = pd.DataFrame.from_dict(AC, orient='index', columns=[f'AC{enplus_vers}'])
+            df_AC = df_AC.rename_axis('ID_code', axis='index')
         
-        #sort the dataframe from the lowest to the highest
-        df2_sorted = df2.sort_values(by = "sum_value", ascending = True)
+        'heating' 
+        # Create an empty dictonary
+        AH = {}
+        string_KPI = 'Zone Ideal Loads Zone Sensible Heating Rate [W] !Hourly'
         
-        #take the top "n" values
+        for esofile in list_ESOs_found:
+            #extract the folder name to identify the "sum values"
+            folder_name = os.path.basename(os.path.dirname(esofile))
+            try:
+                #find all the annual values
+                output = retrieve_kpi(esofile, string_KPI) #is a float64
+            except:
+                print(f'Error found in: {folder_name}')
+ 
+            # Fill the dict
+            AH[folder_name] = output
+            # Convert the dictionary to a DataFrame with index=folder_name
+            df_AH = pd.DataFrame.from_dict(AH, orient='index', columns=['AH'+ enplus_vers])
+            df_AH = df_AH.rename_axis('ID_code', axis='index')
         
-        n = 5
-        top_nvalues_C = df2_sorted.head(n)
-        print(top_nvalues_C)
-           
-        'Total'
-        
-        df_tot = pd.concat([df, df2], axis=1, ignore_index=True)
-        #replace the current df_tot setting inplace = true
-        df_tot.rename(columns={0:'value_heat', 1:'Heating', 2:'value_cool', 3:'Cooling'}, inplace=True)
-    
-        #add a new column 'total' that is the sum of the heat and cool
-        df_tot['Total_consumption'] = df_tot['value_heat'] + df_tot['value_cool']
-        
-        #sort by total consumptions from min to max and take the top 5 results
-        top_nvalues_tot = df_tot.sort_values(by = 'Total_consumption')
-       
-        'export step'
-        
-        #export xlsx files in an output folder
-        os.chdir(base_folder)
-        
+        # Export df in an output folder  
+        os.chdir(base_folder)        
         #create a folder to store the outputs
-        dir_csv = 'csv_outputs'
-        
+        dir_csv = 'csv_outputs'      
         if not os.path.exists(dir_csv):
             os.makedirs(dir_csv)
             print("Directory '% s' created" % dir_csv)
         else:
-            print("Directory '% s' already exists" % dir_csv)
-    
-        #change the current directory
+            print("Directory '% s' already exists" % dir_csv)    
+        # Change the current directory
         os.chdir(dir_csv)
+        # Save the df            
+        df_AC.to_csv(f'AC{enplus_vers}.csv')  
+        df_AH.to_csv(f'AH{enplus_vers}.csv')
+        # Create also the annual total dataframe
+        df_AT = pd.concat([df_AC, df_AH], axis=1).sum(axis=1).to_frame(name=f'AT{enplus_vers}')
+        df_AT.to_csv(f'AT{enplus_vers}.csv')
+        #return to the current dir
+        os.chdir(base_folder)
         
+    #     #sort the dataframe from the lowest to the highest
+    #     df_sorted = df.sort_values(by = "sum_value", ascending = True)
         
-        df_tot.to_csv('results_summary.csv')  
-        top_nvalues_H.to_csv('top_nvalues_H.csv')
-        top_nvalues_tot.to_csv('top_nvalues_total.csv')
-       
-    #return to the current dir
-    os.chdir(base_folder)
-    
+    #     #take the top "n" values
+        
+    #     n = 5
+    #     top_nvalues_H = df_sorted.head(n)
+    #     print(top_nvalues_H)
+          
+              
     
     '''
     Comparison step
@@ -666,33 +574,39 @@ def main(run_files=False, add_output=None, collect_kpi=False):
 
     #read the old thesis results and create a  df
     old = pd.read_excel('OLD_total.xlsx', index_col='ID_code')
-    old = old.round(2)
+    
+    old = old.drop('diff%_AH(v8.9)', axis=1)
+    old = old.drop('diff%_AT(v8.9)', axis=1)
+    old2 = calculate_percentage_diff(old, 'AH(v8.9)')
+    old2 = calculate_percentage_diff(old2, 'AT(v8.9)')
+    
+    
+    
+    
+
     
     #clean the new df with all results and leave only total consumptions
     os.chdir('csv_outputs')
-    new = pd.read_csv('results_summary.csv')
-    new = new.drop(['Unnamed: 0','value_heat','Heating','value_cool'], axis=1)
-    #change column names
-    new = new.set_index('Cooling')
-    new = new.rename_axis('ID_code', axis='index')
-    
+    new_H = pd.read_csv(f'AH{enplus_vers}.csv', index_col='ID_code')
+    new_T = pd.read_csv(f'AT{enplus_vers}.csv', index_col='ID_code')
+    # Create a df with 2 columns
+    new_HT = new_H.join(new_T)
+    # Add the column diff % on the right of the selected column
+    new_HT_diff = calculate_percentage_diff(new_HT, col_name='AH'+ enplus_vers)
+    new_HT_diff = calculate_percentage_diff(new_HT_diff, col_name='AT'+ enplus_vers)
 
-    
-    new_perc = calculate_percentage_diff(new, col_name='Total_consumption')
+    # Now create a big df with all
+    final_df = old2.join(new_HT_diff)
 
-    # Now join the two df old and new
-    final_df = old.join(new_perc)
-    final_df.rename(columns={'En. Totale': 'tot_en(v8.9)', 'Diff. En. Tot. %': 'Diff%', 'Total_consumption': 'tot_en(v22.2)', 'Percentage_diff': 'newDiff%'}, inplace=True)
-
-    
-    
-    #add a new column to final_df with the distance from v8.9 to 22.2
-    final_df['Delta_rel(v22.2-8.9)'] = round((final_df['tot_en(v22.2)'] - final_df['tot_en(v8.9)']) / final_df['tot_en(v8.9)'] *100, 2)
-    
-    final_df['rank_8.9'] =   final_df['tot_en(v8.9)'].rank(ascending=True)
-    final_df['rank_22.2'] =   final_df['tot_en(v22.2)'].rank(ascending=True)
-    final_df['rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9'] # - è salito di posizione
-    
+     
+    #add a new column to final_df with the delta from v8.9 to 22.2
+    #Differenza percentuale = [(Nuovo valore - Vecchio valore) / Vecchio valore] * 100 (la ref è vecchio val)
+    final_df['Delta(v22.2-8.9)'] = final_df['AT(v22.2)'] - final_df['AT(v8.9)']
+    final_df['Delta_%_(v22.2-8.9)'] = round((final_df['Delta(v22.2-8.9)'])/ final_df['AT(v8.9)'] *100, 2)    # Calculate the %diff
+    # Create ranking columns
+    final_df['rank_8.9'] =   final_df['AT(v8.9)'].rank(ascending=True)
+    final_df['rank_22.2'] =   final_df['AT(v22.2)'].rank(ascending=True)
+    final_df['delta_rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9']
     
     
     'style step'
@@ -713,16 +627,21 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     
     styled_df = final_df.style.set_caption("En+ comparison table", )
     
-    styled_df = styled_df.background_gradient(subset=['Delta_rel(v22.2-8.9)'], cmap='RdYlGn')
+    styled_df = styled_df.background_gradient(subset=['Delta_%_(v22.2-8.9)'], cmap='RdYlGn')
     # Apply precision to specific columns 
-    styled_df = styled_df.format({'tot_en(v8.9)': '{:.1f}',
-                                  'Diff%': '{:.2f}',
-                                  'tot_en(v22.2)': '{:.1f}',
-                                  'newDiff%': '{:.2f}',
-                                  'Delta_rel(v22.2-8.9)': '{:.2f}',
+    styled_df = styled_df.format({'AH(v8.9)': '{:.1f}',
+                                  'diff%_AH(v8.9)': '{:.2f}',
+                                  'AT(v8.9)': '{:.1f}',
+                                  'diff%_AT(v8.9)': '{:.2f}',
+                                  'AH(v22.2)': '{:.1f}',
+                                  'diff%_AH(v22.2)': '{:.2f}',
+                                  'AT(v22.2)': '{:.1f}',
+                                  'diff%_AT(v22.2)': '{:.2f}',
+                                  'Delta(v22.2-8.9)': '{:.1f}',
+                                  'Delta_%_(v22.2-8.9)': '{:.2f}',
                                   'rank_8.9': '{:.0f}',
                                   'rank_22.2': '{:.0f}',
-                                  'rank_22.2-8.9': '{:.0f}'})
+                                  'delta_rank_22.2-8.9': '{:.0f}'})
 
     
     # Apply the header styles to the DataFrame
@@ -740,20 +659,24 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     os.chdir(dir_images)      
     
     
-    
     # Convert the styled DataFrame to HTML representation
     html = styled_df.to_html()
     
     # Save the HTML representation to a file
     with open("styled_df.html", "w") as fp:
         fp.write(html)
-        
     
-    return df_sorted, df2_sorted, top_nvalues_H, top_nvalues_C, df_tot, top_nvalues_tot, final_df
+    
+    # Assuming you have the full path to wkhtmltoimage executable
+    config = imgkit.config(wkhtmltoimage=r'C:\Program Files\wkhtmltopdf\bin\wkhtmltoimage.exe')
+    # Assuming you have the HTML content in the 'html' variable
+    imgkit.from_string(html, 'styled_df.jpg', config=config, options={'quality': 100})
+    
+    return df_AH, df_AC, final_df
 
     
 if __name__  == "__main__" :
-    results_heat, results_cool, top_nvalues_C, top_nvalues_H, df_tot, top_nvalues_tot, final_df = main()
+    df_AH, df_AC, final_df = main()
     
 
     
