@@ -13,14 +13,16 @@ Created on Fri Jun 30 11:20:04 2023
 "##                               Initialization                            ##"
 "#############################################################################"
 
-import matplotlib as mpl
+
 import os
 from itertools import product
 import fnmatch
 from eppy.modeleditor import IDF
 import pandas as pd
-import re 
-import imgkit
+import re
+import seaborn as sns
+import dataframe_image as dfi
+import matplotlib.pyplot as plt
 
 enplus_vers = '(v22.2)'  #change the number
 
@@ -395,7 +397,7 @@ def color_negative_red(val):
 "###                                 Main                                    ###"
 "###############################################################################"
 
-def main(run_files=None, add_output=None, collect_kpi=None):
+def main(run_files=False, add_output=None, collect_kpi=False):
     
     df_AH = None
     df_AC = None
@@ -556,34 +558,23 @@ def main(run_files=None, add_output=None, collect_kpi=None):
         #return to the current dir
         os.chdir(base_folder)
         
-    #     #sort the dataframe from the lowest to the highest
-    #     df_sorted = df.sort_values(by = "sum_value", ascending = True)
-        
-    #     #take the top "n" values
-        
-    #     n = 5
-    #     top_nvalues_H = df_sorted.head(n)
-    #     print(top_nvalues_H)
-          
-              
+
+    
+      
     
     '''
     Comparison step
     '''
     
-
     #read the old thesis results and create a  df
     old = pd.read_excel('OLD_total.xlsx', index_col='ID_code')
-    
+    # redo the diff %
     old = old.drop('diff%_AH(v8.9)', axis=1)
     old = old.drop('diff%_AT(v8.9)', axis=1)
     old2 = calculate_percentage_diff(old, 'AH(v8.9)')
     old2 = calculate_percentage_diff(old2, 'AT(v8.9)')
     
     
-    
-    
-
     
     #clean the new df with all results and leave only total consumptions
     os.chdir('csv_outputs')
@@ -607,10 +598,55 @@ def main(run_files=None, add_output=None, collect_kpi=None):
     final_df['rank_8.9'] =   final_df['AT(v8.9)'].rank(ascending=True)
     final_df['rank_22.2'] =   final_df['AT(v22.2)'].rank(ascending=True)
     final_df['delta_rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9']
+  
+    
+  
+    
+    ' Ranking solutions'    
+    
+    'Old rankings'
+    df_topAH_old  = final_df[['AH(v8.9)','diff%_AH(v8.9)']]
+    df_topAH_old = df_topAH_old.sort_values(by = 'diff%_AH(v8.9)', ascending = True)
+    # Take the top 'n' values
+    n = 5
+    df_topAH_old = df_topAH_old.head(n)
+ 
+    df_topAT_old  = final_df[['AT(v8.9)','diff%_AT(v8.9)']]
+    df_topAT_old = df_topAT_old.sort_values(by = 'diff%_AT(v8.9)', ascending = True)
+    # Take the top 'n' values
+    n = 5
+    df_topAT_old = df_topAT_old.head(n)    
     
     
-    'style step'
-    # Define the CSS styles
+    'New rankings'
+    df_topAH  = final_df[['AH(v22.2)','diff%_AH(v22.2)']]
+    df_topAH = df_topAH.sort_values(by = 'diff%_AH(v22.2)', ascending = True)
+    # Take the top 'n' values
+    n = 5
+    df_topAH = df_topAH.head(n)
+ 
+    df_topAT  = final_df[['AT(v22.2)','diff%_AT(v22.2)']]
+    df_topAT = df_topAT.sort_values(by = 'diff%_AT(v22.2)', ascending = True)
+    # Take the top 'n' values
+    n = 5
+    df_topAT = df_topAT.head(n)   
+
+
+
+    # Compare the rankings
+    # Set the index as a column
+    df_topAH_old_reset = df_topAH_old.reset_index().rename(columns={'ID_code': 'ID_code(v8.9)'})
+    df_topAH_reset = df_topAH.reset_index().rename(columns={'ID_code': 'ID_code(v22.2)'})
+    
+    df_topAT_old_reset = df_topAT_old.reset_index().rename(columns={'ID_code': 'ID_code(v8.9)'})
+    df_topAT_reset = df_topAT.reset_index().rename(columns={'ID_code': 'ID_code(v22.2)'})
+
+    # Join the two dfs and see the difference
+    df_topAH_comp = df_topAH_old_reset.join(df_topAH_reset).round(2)
+    df_topAT_comp = df_topAT_old_reset.join(df_topAT_reset).round(2)
+    
+    
+    ' Create the .html'
  
     # Define the CSS styles for index and column names highlighting
     header_style = [
@@ -623,8 +659,7 @@ def main(run_files=None, add_output=None, collect_kpi=None):
             "props": [("font-weight", "bold"), ("background-color", "#b2b2b2")]
         }
     ]
-
-    
+  
     styled_df = final_df.style.set_caption("En+ comparison table", )
     
     styled_df = styled_df.background_gradient(subset=['Delta_%_(v22.2-8.9)'], cmap='RdYlGn')
@@ -642,8 +677,7 @@ def main(run_files=None, add_output=None, collect_kpi=None):
                                   'rank_8.9': '{:.0f}',
                                   'rank_22.2': '{:.0f}',
                                   'delta_rank_22.2-8.9': '{:.0f}'})
-
-    
+   
     # Apply the header styles to the DataFrame
     styled_df = styled_df.set_table_styles(header_style)
     
@@ -657,26 +691,56 @@ def main(run_files=None, add_output=None, collect_kpi=None):
         print("Directory '% s' already exists" % dir_images)
     #change the current directory
     os.chdir(dir_images)      
-    
-    
+      
     # Convert the styled DataFrame to HTML representation
     html = styled_df.to_html()
     
     # Save the HTML representation to a file
     with open("styled_df.html", "w") as fp:
         fp.write(html)
+        
+        
+        
+    ' Save dataframes as images'
+    
+    dfi.export(df_topAH_comp, 'df_topAH_comp.png')
+    dfi.export(df_topAT_comp, 'df_topAT_comp.png')
     
     
-    # Assuming you have the full path to wkhtmltoimage executable
-    config = imgkit.config(wkhtmltoimage=r'C:\Program Files\wkhtmltopdf\bin\wkhtmltoimage.exe')
-    # Assuming you have the HTML content in the 'html' variable
-    imgkit.from_string(html, 'styled_df.jpg', config=config, options={'quality': 100})
+    'final df as an heatmap'
     
-    return df_AH, df_AC, final_df
+    # Transpose the df to exchange x and y
+    transposed_df = final_df.T
+    # Trim the df with only the rows containing the distance %. Function FILTER
+    transposed_df = transposed_df.filter(like='Delta_%_(v22.2-8.9)', axis=0)
+    # Set the size of the heatmap using figsize
+    fig, ax = plt.subplots(figsize=(150, 2))  # Adjust the width and height as needed   
+    # Create a diverging color palette 
+    color_palette = sns.color_palette("coolwarm", as_cmap=True)
+    # Plot a heatmap with annotation
+    sns.heatmap(transposed_df,  
+                cmap=color_palette,
+                center = 0,
+                annot=True,
+                fmt='',
+                ax=ax,
+                linewidths=1.5,
+                annot_kws={'rotation': 90})
+    # Set labels and title
+    ax.set_title('Distance % Heatmap En+ 22.2-8.9 ', weight='bold')
+    # Save the heatmap as an image in the specified folder
+    output_filename = 'Distance % Heatmap En+ 22.2-8.9.png'
+    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+    
+    # Display the heatmap
+    plt.show()
+
+
+    return df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp
 
     
 if __name__  == "__main__" :
-    df_AH, df_AC, final_df = main()
+    df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp = main()
     
 
     
