@@ -729,7 +729,7 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     # Set labels and title
     ax.set_title('Distance % Heatmap En+ 22.2-8.9 ', weight='bold')
     # Save the heatmap as an image in the specified folder
-    output_filename = 'Distance % Heatmap En+ 22.2-8.9.png'
+    output_filename = 'Dist%_Heatmap.png'
     plt.savefig(output_filename, dpi=300, bbox_inches='tight')
     
     # Display the heatmap
