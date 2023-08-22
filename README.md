@@ -67,7 +67,7 @@ The Python script performs the following actions:
 The first image is a heatmap of the percentage difference between the values of total annual energy consumption (AT, annual total) of the old EnergyPlus (8.9) and the new one (22.2). This is used to gain an initial overview of the results and identify patterns and errors. In the image, you can observe differences in Sunspace Trombes (ST) and in some individual cases. The difference compared to the values of the old EnergyPlus is < 1.5%, demonstrating excellent results.
 
 
-![Alt Text](images_outputs/Distance % Heatmap En+ 22.2-8.9.png) 
+![Alt Text](images_outputs/Dist%_Heatmap.png) 
 
 ### Rankings
 In the ranking of the best combinations of annual heating (AH), the top combinations remain the same but in different positions.
