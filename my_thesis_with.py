@@ -23,8 +23,8 @@ import re
 import seaborn as sns
 import dataframe_image as dfi
 import matplotlib.pyplot as plt
+import numpy as np
 
-enplus_vers = '(v22.2)'  #change the number
 
 # Define the base case identifiers
 base_cases = {
@@ -33,7 +33,7 @@ base_cases = {
     'O_L1':'B2_O_L1_Base_S_0.12_5.9_TS1',
     'O_L2':'B2_O_L2_Base_S_0.12_5.9_TS1',
     }
-    
+ 
 
 "#############################################################################"
 "##                            Common Functions                             ##"
@@ -93,7 +93,7 @@ def search_extensions(current_dir, extension_file, create_list=None):
         
     #print the total number of files found   
     count_files = len(files_found) 
-    print(f"-->Total files found: {count_files}")
+    print(f"-->Total files{extension_file} found: {count_files}")
     
     if create_list:
         file_path = os.path.join(current_dir, f"{extension_file}.txt")
@@ -369,10 +369,56 @@ def retrieve_kpi(eso_path, key_string):
     
     return sum_df #is a float64
 
+###############################################################################
+###                               rank_values                               ###
+###############################################################################
+    
+def rank_values (df, column_to_rank, n, *columns ):
+    '''
+    extract from a df n columns, sort the df based on the column_to_rank and
+    take the top n values of the new df. Return the new df
+    '''
+    # Take from the df only the selected columns in *columns
+    trim_df = df[list(columns)]
+    # Sort the values based on the column to rank
+    trim_df = trim_df.sort_values(by= f"{column_to_rank}", ascending=True)
+    # Take the n top values
+    ranked_df = trim_df.head(n)
+    
+    return ranked_df
 
-"#############################################################################"
-"##                              STYLER SECTION                             ##"
-"#############################################################################"
+###############################################################################
+###                               compare_df                                ###
+###############################################################################
+def compare_df (df1, df2, version1, version2):
+    """
+    Compare two DataFrames by joining them and rounding the values.
+    """
+    df1 = df1.reset_index().rename(columns={'ID_code': f'ID_code({version1})'})
+    df2 = df2.reset_index().rename(columns={'ID_code': f'ID_code({version2})'})
+    # Join the two dfs and see the difference
+    df_join = df1.join(df2).round(2)
+    return df_join
+
+
+###############################################################################
+###                      calculate_delta_percentage                         ###
+###############################################################################
+
+def calculate_delta_percentage(new_df, old_df, version_new, version_old, value_column):
+    """
+    Calculate the delta percentage between two DataFrames for a specific column.
+    """
+    delta_column = f'Delta_%_({version_new}-{version_old})'
+    new_df[delta_column] = round(((new_df[value_column] - old_df[value_column]) / old_df[value_column]) * 100, 2)
+    return new_df
+
+
+
+
+#############################################################################"
+##                              STYLER SECTION                             ##"
+#############################################################################"
 
 
 def color_negative_red(val):
@@ -383,12 +429,6 @@ def color_negative_red(val):
     """
     color = 'red' if val < 0 else 'black'
     return 'color: %s' % color
-
-#df.style.apply(color_negative_red)
-
-
-
-
 
 
 
@@ -431,8 +471,21 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         'base_thermal_storage': ['TS1'],
         }
     
+    enplus_vers = '(v22.2)'  #set the current En+ version
+
+
+
+
     #run this file in the root folder
     base_folder = os.getcwd()
+         
+    #create a folder to store the outputs
+    dir_images = 'images_outputs'   
+    if not os.path.exists(dir_images):
+        os.makedirs(dir_images)
+        print("Directory '% s' created" % dir_images)
+    else:
+        print("Directory '% s' already exists" % dir_images)
         
     '''
     Create first list (idf)
@@ -566,6 +619,8 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     Comparison step
     '''
     
+    ' final_df'
+    
     #read the old thesis results and create a  df
     old = pd.read_excel('OLD_total.xlsx', index_col='ID_code')
     # redo the diff %
@@ -573,11 +628,10 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     old = old.drop('diff%_AT(v8.9)', axis=1)
     old2 = calculate_percentage_diff(old, 'AH(v8.9)')
     old2 = calculate_percentage_diff(old2, 'AT(v8.9)')
-    
-    
-    
+     
     #clean the new df with all results and leave only total consumptions
     os.chdir('csv_outputs')
+    
     new_H = pd.read_csv(f'AH{enplus_vers}.csv', index_col='ID_code')
     new_T = pd.read_csv(f'AT{enplus_vers}.csv', index_col='ID_code')
     # Create a df with 2 columns
@@ -588,8 +642,7 @@ def main(run_files=False, add_output=None, collect_kpi=False):
 
     # Now create a big df with all
     final_df = old2.join(new_HT_diff)
-
-     
+  
     #add a new column to final_df with the delta from v8.9 to 22.2
     #Differenza percentuale = [(Nuovo valore - Vecchio valore) / Vecchio valore] * 100 (la ref è vecchio val)
     final_df['Delta(v22.2-8.9)'] = final_df['AT(v22.2)'] - final_df['AT(v8.9)']
@@ -601,49 +654,54 @@ def main(run_files=False, add_output=None, collect_kpi=False):
   
     
   
+    ' 4 main dfs from the final_df'
+    # Create four DataFrames from final_df and store them in a dictionary
+    four_df = {
+            'O_L1': final_df.filter(like="O_L1", axis=0),
+            'O_L2': final_df.filter(like="O_L2", axis=0),
+            'R_L1': final_df.filter(like="R_L1", axis=0),
+            'R_L2': final_df.filter(like="R_L2", axis=0),
+            }
+   
+
     
-    ' Ranking solutions'    
     
-    'Old rankings'
-    df_topAH_old  = final_df[['AH(v8.9)','diff%_AH(v8.9)']]
-    df_topAH_old = df_topAH_old.sort_values(by = 'diff%_AH(v8.9)', ascending = True)
-    # Take the top 'n' values
-    n = 5
-    df_topAH_old = df_topAH_old.head(n)
+    ' Ranking solutions'
+    #save the dfs as images in the right folder
+    os.chdir(base_folder)
+    os.chdir(dir_images)
+    
+    # Create an empty dictionary to store the results
+    results_dfs = {}
+    
+    for df_name, df in four_df.items():
+        # Define the prefixes for AH and AT
+        prefixes = ['AH', 'AT']
+        
+        for prefix in prefixes:
+            old_df = rank_values(df, f'diff%_{prefix}(v8.9)', 5, f'{prefix}(v8.9)', f'diff%_{prefix}(v8.9)')
+            new_df = rank_values(df, f'diff%_{prefix}(v22.2)', 5, f'{prefix}(v22.2)', f'diff%_{prefix}(v22.2)')
+            
+            df_comp = compare_df(old_df, new_df, 8.9, 22.2)
+            
+            delta_col = f'Delta_%_(v22.2-8.9)'
+            df_comp[delta_col] = round((df_comp[f'{prefix}(v22.2)'] - df_comp[f'{prefix}(v8.9)']) / df_comp[f'{prefix}(v8.9)'] * 100, 2)
+            
+            # Store the results in the dictionary using df_name and prefix as keys
+            results_dfs[f'top{prefix}_{df_name}'] = df_comp
+       
+            # You can access the results later like this:
+            # results_dfs['AH_O_L1'] will give you the AH results for O_L1
+            # If you want to access a specific column within the DataFrame stored in 'AH_O_L1', you can use normal DataFrame indexing
+            # delta_value = results['AH_O_L1']['Delta_%_(v22.2-8.9)']
+            
+            # Set the index starting from 1
+            df_comp.index = range(1, len(df_comp) + 1)
+            # Save the df as image
+            dfi.export(df_comp, f'top{prefix}_{df_name}.png', dpi=300)
+
+    
  
-    df_topAT_old  = final_df[['AT(v8.9)','diff%_AT(v8.9)']]
-    df_topAT_old = df_topAT_old.sort_values(by = 'diff%_AT(v8.9)', ascending = True)
-    # Take the top 'n' values
-    n = 5
-    df_topAT_old = df_topAT_old.head(n)    
-    
-    
-    'New rankings'
-    df_topAH  = final_df[['AH(v22.2)','diff%_AH(v22.2)']]
-    df_topAH = df_topAH.sort_values(by = 'diff%_AH(v22.2)', ascending = True)
-    # Take the top 'n' values
-    n = 5
-    df_topAH = df_topAH.head(n)
- 
-    df_topAT  = final_df[['AT(v22.2)','diff%_AT(v22.2)']]
-    df_topAT = df_topAT.sort_values(by = 'diff%_AT(v22.2)', ascending = True)
-    # Take the top 'n' values
-    n = 5
-    df_topAT = df_topAT.head(n)   
-
-
-
-    # Compare the rankings
-    # Set the index as a column
-    df_topAH_old_reset = df_topAH_old.reset_index().rename(columns={'ID_code': 'ID_code(v8.9)'})
-    df_topAH_reset = df_topAH.reset_index().rename(columns={'ID_code': 'ID_code(v22.2)'})
-    
-    df_topAT_old_reset = df_topAT_old.reset_index().rename(columns={'ID_code': 'ID_code(v8.9)'})
-    df_topAT_reset = df_topAT.reset_index().rename(columns={'ID_code': 'ID_code(v22.2)'})
-
-    # Join the two dfs and see the difference
-    df_topAH_comp = df_topAH_old_reset.join(df_topAH_reset).round(2)
-    df_topAT_comp = df_topAT_old_reset.join(df_topAT_reset).round(2)
     
     
     ' Create the .html'
@@ -660,8 +718,7 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         }
     ]
   
-    styled_df = final_df.style.set_caption("En+ comparison table", )
-    
+    styled_df = final_df.style.set_caption("En+ comparison table", ) 
     styled_df = styled_df.background_gradient(subset=['Delta_%_(v22.2-8.9)'], cmap='RdYlGn')
     # Apply precision to specific columns 
     styled_df = styled_df.format({'AH(v8.9)': '{:.1f}',
@@ -676,64 +733,47 @@ def main(run_files=False, add_output=None, collect_kpi=False):
                                   'Delta_%_(v22.2-8.9)': '{:.2f}',
                                   'rank_8.9': '{:.0f}',
                                   'rank_22.2': '{:.0f}',
-                                  'delta_rank_22.2-8.9': '{:.0f}'})
-   
+                                  'delta_rank_22.2-8.9': '{:.0f}'}) 
     # Apply the header styles to the DataFrame
-    styled_df = styled_df.set_table_styles(header_style)
-    
-    os.chdir(base_folder)      
-    #create a folder to store the outputs
-    dir_images = 'images_outputs'   
-    if not os.path.exists(dir_images):
-        os.makedirs(dir_images)
-        print("Directory '% s' created" % dir_images)
-    else:
-        print("Directory '% s' already exists" % dir_images)
-    #change the current directory
-    os.chdir(dir_images)      
-      
+    styled_df = styled_df.set_table_styles(header_style)      
     # Convert the styled DataFrame to HTML representation
-    html = styled_df.to_html()
-    
+    html = styled_df.to_html() 
     # Save the HTML representation to a file
     with open("styled_df.html", "w") as fp:
         fp.write(html)
         
         
         
-    ' Save dataframes as images'
     
-    dfi.export(df_topAH_comp, 'df_topAH_comp.png')
-    dfi.export(df_topAT_comp, 'df_topAT_comp.png')
-    
-    
-    'final df as an heatmap'
-    
-    # Transpose the df to exchange x and y
-    transposed_df = final_df.T
-    # Trim the df with only the rows containing the distance %. Function FILTER
-    transposed_df = transposed_df.filter(like='Delta_%_(v22.2-8.9)', axis=0)
-    # Set the size of the heatmap using figsize
-    fig, ax = plt.subplots(figsize=(150, 2))  # Adjust the width and height as needed   
-    # Create a diverging color palette 
-    color_palette = sns.color_palette("coolwarm", as_cmap=True)
-    # Plot a heatmap with annotation
-    sns.heatmap(transposed_df,  
-                cmap=color_palette,
-                center = 0,
-                annot=True,
-                fmt='',
-                ax=ax,
-                linewidths=1.5,
-                annot_kws={'rotation': 90})
-    # Set labels and title
-    ax.set_title('Distance % Heatmap En+ 22.2-8.9 ', weight='bold')
-    # Save the heatmap as an image in the specified folder
-    output_filename = 'Dist%_Heatmap.png'
-    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-    
-    # Display the heatmap
-    plt.show()
+    '4 main dfs from the final_df as heatmaps'
+    for df_name, df in four_df.items():
+        
+        # Transpose the df to exchange x and y
+        transposed_df = df.T
+        # Trim the df with only the rows containing the distance %. Function FILTER
+        transposed_df = transposed_df.filter(like='Delta_%_(v22.2-8.9)', axis=0)
+        # Set the size of the heatmap using figsize
+        fig, ax = plt.subplots(figsize=(40, 2))  # Adjust the width and height as needed   
+        # Create a diverging color palette 
+        color_palette = sns.color_palette("coolwarm", as_cmap=True)
+        # Plot a heatmap with annotation
+        sns.heatmap(transposed_df,  
+                    cmap=color_palette,
+                    center = 0,
+                    annot=True,
+                    fmt='',
+                    ax=ax,
+                    linewidths=1.5,
+                    annot_kws={'rotation': 90})
+        # Set labels and title
+        ax.set_title(f'{df_name}', weight='bold')
+        # Save the heatmap as an image in the specified folder
+        output_filename = f'{df_name}.png'
+        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+        
+        # Display the heatmap
+        plt.show()
+        
 
 
     return df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp
