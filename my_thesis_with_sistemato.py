@@ -63,10 +63,15 @@ dict_orient = {
     "_W_": 270}
 
 dict_glass = {
-    "_0.8_": "3xGLASS_U0.8_AIR",
-    "_1.0_": "3xGLASS_U1.0_AIR",
+    "_0.8_": "U-0.8_G0.7",
+    "_1.0_": "U-1.0_G-0.7",
     "_2.3_": "2xGLASS_U2.3_KRYPTON",
     "_5.9_": "Exterior Window",   
+    }
+dict_glass_pure = {
+    "_0.8_": "U-0.8_G0.7",
+    "_1.0_": "U-1.0_G-0.7",
+    "_2.3_": "2xGLASS_U2.3_KRYPTON" 
     }
 
 dict_storage = {
@@ -292,8 +297,8 @@ def replace_construction_part(file_path):
         lines = file.readlines()
 
     # Define the part to search for and its replacement
-    target_part = "U-1.0_G-0.7"
-    replacement_part = "3xGLASS_U1.0_AIR"
+    target_part = "U-0.8_G0.7"
+    replacement_part = "3xGLASS_U0.8_AIR"
     found_at_least_once = False
 
     # Iterate through the lines and replace the target part if found
@@ -448,6 +453,8 @@ def verifyIDF(file_path, version):
     for key in dict_glass:
         if key in file_name:
             glass = dict_glass[key]
+            # Get the values of the other keys
+            anti_glass = {key: value for key, value in dict_glass_pure.items() if dict_glass_pure[key] != glass}
             print(f"Glass of the file name: {glass} -> {key}")
             break  # Exit the loop if a match is found
     else:
@@ -509,9 +516,16 @@ def verifyIDF(file_path, version):
         if orient_marker in line and str(orient) in line:
             match[2] = 1
             
+    glass_found = None
+    anti_glass_found = None 
     glass_lines = idf_dict["FENESTRATIONSURFACE:DETAILED"]
     for line in glass_lines:
         if glass_marker in line and glass in line:
+            glass_found = True
+        # Check if one by one if there's a value of the anti_glass dict in the line
+        if glass_marker in line and any(value in line for value in anti_glass.values()):
+            anti_glass_found = True
+        if glass_found and not anti_glass_found:
             match[3] = 1
             
     thermal_lines = idf_dict["BUILDINGSURFACE:DETAILED"]
@@ -895,7 +909,7 @@ def plot_overlapping_line_charts(df_list, x_col, y_col, labels=None, x_label=Non
 "#############################################################################"
 "##                                    Main                                 ##"
 "#############################################################################"
-def main(run_files=False, collect_kpi=False, verify = False):
+def main(run_files=False, collect_kpi=False, verify = True):
       
     df_topAH_comp = None 
     df_topAT_comp = None
