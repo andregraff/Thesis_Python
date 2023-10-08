@@ -24,7 +24,7 @@ import seaborn as sns
 import dataframe_image as dfi
 import matplotlib.pyplot as plt
 import numpy as np
-
+import cv2
 
 # Define the base case identifiers
 base_cases = {
@@ -34,12 +34,51 @@ base_cases = {
     'O_L2':'B2_O_L2_Base_S_0.12_5.9_TS1',
     }
  
+dict_orient = {
+    "_S_": 180,
+    "_E_": 90,
+    "_W_": 270}
+
+dict_glass = {
+    "_0.8_": "U-0.8_G0.7",
+    "_1.0_": "U-1.0_G-0.7",
+    "_2.3_": "2xGLASS_U2.3_KRYPTON",
+    "_5.9_": "Exterior Window",   
+    }
+
+dict_storage = {
+    "_TS1": "Wall",  
+    "_TS2": ["TS2","TS_2"],
+    "_TS3": ["TS3","TS_3"]
+    }
+
+dict_use = {
+    "_O_": "OFFICE",  
+    "_R_": "RES"
+    }
 
 "#############################################################################"
 "##                            Common Functions                             ##"
 "#############################################################################"
 
+def delete_files_with_string(root_folder, search_string):
+    for root, dirs, files in os.walk(root_folder):
+        for file in files:
+            if search_string in file:
+                file_path = os.path.join(root, file)
+                os.remove(file_path)
+                print(f"Deleted file: {file_path}")
 
+# Specify the root folder to start the search from
+# root_folder = r'C:\Users\andre\Desktop\Week1\#enplus_models_22.2_onlyIDF'
+# search_string = 'V850'
+
+def delete_non_idf_files(folder):
+    for current_folder, subfolders, files in os.walk(folder):
+        for file_name in files:
+            if not file_name.endswith(".idf"):
+                full_path = os.path.join(current_folder, file_name)
+                os.remove(full_path)
 
 ###############################################################################
 ###                           search_extensions                             ###
@@ -50,22 +89,13 @@ def search_extensions(current_dir, extension_file, create_list=None):
   Return a list of retrieved file paths based on the specified extension like .html or .csv.
   If create_list is True, it creates a .txt file of the list.
 
-  Parameters
-  ----------
-  current_dir : str
-      The directory path to search for files.
-  extension_file : str
-      The file extension to search for (e.g., '.html', '.csv').
-  create_list : bool, optional
-      If True, creates a .txt file of the list. Default is None.
-
   Returns
   -------
   list
       A list of retrieved file paths.
   """
     #Initialize a list of valid extensions
-    valid_extensions = ['.html', '.csv', '.idf', '.eso']
+    valid_extensions = ['.html', '.csv', '.idf', '.eso', '.htm']
 
    
     #this is a while loop to ensure it matches one of the valid extensions
@@ -185,7 +215,6 @@ def rename_idf_files(current_dir):
                     # Rename the file
                     os.rename(os.path.join(root, file), new_name)
           
-                    
           
 ###############################################################################
 ###                           rename_folders                              ###
@@ -221,32 +250,271 @@ def rename_folders(root, inp, out):
 ###                        replace_construction_line                        ###
 ###############################################################################
 
-def replace_construction_line(file_path):
+def replace_construction_part(file_path):
+    # Get the name of the file
+    file_name = os.path.basename(file_path)
     # Read the file and store its lines in a list
     with open(file_path, 'r') as file:
         lines = file.readlines()
 
-    # Search for the target construction line and replace it wherever it occurs
-    target_line = "    2xGLASS_U2.3_KRYPTON,    !- Construction Name\n"
-    replacement_line = "3xGLASS_U1.0_AIR,    \n"
+    # Define the part to search for and its replacement
+    target_part = "3xGLASS_U1.0_AIR"
+    replacement_part = "U-1.0_G-0.7"
     found_at_least_once = False
 
+    # Iterate through the lines and replace the target part if found
     for index, line in enumerate(lines):
-        if target_line in line:
+        if target_part in line:
             # Check if 3 lines above contain "FenestrationSurface:Detailed,"
-            if index >= 3 and "  FenestrationSurface:Detailed,\n" in lines[index - 3]:
-                lines[index] = replacement_line
+            if index >= 3 and "FenestrationSurface:Detailed," in lines[index - 3]:
+                # Replace the target part with the replacement part
+                lines[index] = line.replace(target_part, replacement_part)
                 found_at_least_once = True
 
     # Write the modified lines back to the file if any replacements were made
     if found_at_least_once:
         with open(file_path, 'w') as file:
             file.writelines(lines)
-        print("Substitution successful.")
+        print(f"Substitution successful in {file_name}.")
     else:
-        print("Target construction line not found in the file.")               
+        print(f"Target part not found in the file {file_name}.")        
 
 
+###############################################################################
+###                          replace_piece_of_text                         ###
+###############################################################################
+
+def replace_piece_of_text(file_path, replacement_lines, start_line, end_line):
+    # Read the contents of the file
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+
+    start_index = None
+    end_index = None
+
+    # Find the indices of the start and end lines
+    for i, line in enumerate(lines):
+        if start_line in line:
+            start_index = i + 1
+        elif end_line in line:
+            end_index = i
+
+    # Check if start and end lines were found
+    if start_index is None or end_index is None:
+        print("Start or end line not found in the file.")
+        return
+
+    # Replace lines in the specified range with the replacement_lines
+    lines[start_index:end_index] = replacement_lines
+
+    # Write the updated content back to the file
+    with open(file_path, 'w') as file:
+        file.writelines(lines)
+
+
+# # Example usage:
+# testo = r"R:\Week1\Thesis_Python-main\#enplus_models\Models_8.5_fixed\replacement.txt"
+# with open(testo, 'r') as file:
+#     replacement_lines = file.readlines()
+    
+# start_line = '!-   ===========  ALL OBJECTS IN CLASS: MATERIAL ===========\n'
+# end_line = '!-   ===========  ALL OBJECTS IN CLASS: GLOBALGEOMETRYRULES ===========\n'
+
+# base_folder = r"R:\Week1\Thesis_Python-main\#enplus_models\Models_8.5_fixed"
+# list_IDFs_found = search_extensions(base_folder, extension_file = '.idf')
+# for file_path in list_IDFs_found:
+#     replace_piece_of_text(file_path, replacement_lines, start_line, end_line)   
+
+
+###############################################################################
+###                               check_line                                ###
+###############################################################################
+
+def check_line(file_path, line_name):
+    '''
+    Check if exixsts a line under anoter specified line
+    '''
+    # Get the name of the file
+    file_name = os.path.basename(file_path)
+    # Read the file and store its lines in a list
+    with open(file_path, 'r') as file:
+        lines = file.readlines()
+        
+    found_at_least_once = False
+
+    # Iterate through the lines
+    for index, line in enumerate(lines):
+        if line_name in line:
+            # Check if 3 lines above contain "FenestrationSurface:Detailed,"
+            if index >= 1 and "Version," in lines[index - 1]:
+                print(f"found construction at line {index}")
+                found_at_least_once = True
+
+    if found_at_least_once:
+        print(f"Found in {file_name}.")
+        return 1
+    else:
+        print(f"Not found in the file {file_name}.") 
+        return 0
+
+
+###############################################################################
+###                           split_idf_objects                             ###
+###############################################################################
+
+def split_idf_objects(file_path):
+    
+    idf_dict = {}
+    splitter_string = "!-   ===========  ALL OBJECTS IN CLASS:"
+    
+    with open(file_path, 'r') as idf:
+        data = idf.read()
+        sections = data.split(splitter_string)
+        
+        for i, section in enumerate(sections[1:], start=1):
+            lines = section.strip().split('\n')
+            obj_name = lines[0].strip('= ')
+            obj_contents = lines[1:]  # Store contents as a list
+            idf_dict[obj_name] = obj_contents
+            
+    return idf_dict
+       
+  
+
+
+
+###############################################################################
+###                               verifyIDF                                 ###
+###############################################################################
+def verifyIDF(file_path, version):
+    '''
+    Check if the parameters in the file and in the file's name correspond.
+    Return 1 if the selected parameter is found else 0. Use this function to 
+    create a list of unmatched files.
+    '''
+    # Get the name of the file
+    file_name = os.path.basename(file_path)
+    # Markers
+    version_marker = "Version"
+    orient_marker = "!- North Axis {deg}" 
+    glass_marker = "!- Construction Name"
+    storage_marker = "!- Construction Name"
+    use_marker = "Schedule Name"
+    # Initialize the values of the keys
+    orient = None
+    glass = None
+    storage = None
+    use= None
+    
+    print(f"    Reading {file_name}")
+    
+    ' Verify names'
+    
+    # Verify use
+    for key in dict_use:
+        if key in file_name:
+            use = dict_use[key]
+            print(f"Use of the file name: {use} -> {key}")
+            break  # Exit the loop if a match is found
+    else:
+        print("Use not found in the file name")
+    
+    # Verify orientation
+    for key in dict_orient:
+        if key in file_name:
+            orient = dict_orient[key]
+            print(f"Orientation of the file name: {orient} -> {key}")
+            break  # Exit the loop if a match is found
+    else:
+        print(f"Orientation not found in the {file_path}")
+        
+    # Verify glass
+    for key in dict_glass:
+        if key in file_name:
+            glass = dict_glass[key]
+            print(f"Glass of the file name: {glass} -> {key}")
+            break  # Exit the loop if a match is found
+    else:
+        print(f"Glass not found in the {file_path}") 
+   
+    # Verify thermal storage
+    for key in dict_storage:
+        if key in file_name:
+            storage = dict_storage[key] #return a list
+            print(f"Thermal storage of the file name: {storage} -> {key}")
+            break  # Exit the loop if a match is found
+    else:
+        print(f"TS not found in the {file_path}") 
+        
+        
+    ' Verify files' 
+    
+    idf_dict = split_idf_objects(file_path)
+    
+    # # Read the file and store its lines in a list
+    # with open(file_path, 'r') as file:
+    #     lines = file.readlines()
+   
+    match = [0,0,0,0,0]
+    
+    # Verify the usage. to do this you must  verify multiple objects in the idf
+    keys_to_access = ["PEOPLE", "LIGHTS", "ELECTRICEQUIPMENT", "HVACTEMPLATE:THERMOSTAT"]
+    # Initialize an empty list to store the values
+    use_lists = []
+    # Access the values from the dictionary
+    for key in keys_to_access:
+        if key in idf_dict:
+            use_lists.append(idf_dict[key])
+        else:
+            # Handle the case when a key is not found in the dictionary
+            use_lists.append(None)            
+    # Initialize a list to track matches
+    match_use = []        
+    for obj in use_lists:
+        for line in obj:
+            if use_marker in line and str(use) in line:
+                match_use.append(True)
+                break
+            elif use_marker in line and not str(use) in line:
+                match_use.append(False)
+    # Check if all elements in match_use are True
+    if all(match_use):
+        match[0] = 1
+        
+    # Get the lines for the "VERSION" object
+    version_lines = idf_dict["VERSION"]
+    # Iterate through the lines in the "VERSION" object
+    for line in version_lines:
+        if version_marker in line and version in line:
+            match[1] = 1
+            
+    building_lines = idf_dict["BUILDING"]
+    for line in building_lines:
+        if orient_marker in line and str(orient) in line:
+            match[2] = 1
+            
+    glass_lines = idf_dict["FENESTRATIONSURFACE:DETAILED"]
+    for line in glass_lines:
+        if glass_marker in line and glass in line:
+            match[3] = 1
+            
+    thermal_lines = idf_dict["BUILDINGSURFACE:DETAILED"]
+    # Add an exception for the thermal cap 2 and 3
+    for line in thermal_lines:
+        if storage == ["TS3","TS_3"] or storage == ["TS2","TS_2"]:
+            for element in storage:        
+                if storage_marker in line and element in line:
+                    match[4] = 1
+        else:
+            if storage_marker in line and str(storage) in line:
+                match[4] = 1
+       
+    return match
+
+
+
+    
+    
 ###############################################################################
 ###                               Run_idf                               ###
 ###############################################################################
@@ -414,21 +682,98 @@ def calculate_delta_percentage(new_df, old_df, version_new, version_old, value_c
     return new_df
 
 
+###############################################################################
+###                      select_values_within_range                         ###
+###############################################################################
 
+def rank_with_range(df, column_name, range_value):
+    # Find the minimum value in the specified column
+    min_value = df[column_name].min()
+    
+    # Select values in the specified column that are within the specified range
+    selected_values = df[(df[column_name] >= min_value) & (df[column_name] <= min_value + range_value)][column_name]
+    
+    print(f"All values in '{column_name}' that are less than or equal to {range_value} units from the min:")
+    print(selected_values)
+    
+    return selected_values
 
 #############################################################################"
 ##                              STYLER SECTION                             ##"
 #############################################################################"
 
 
-def color_negative_red(val):
-    """
-    Takes a scalar and returns a string with
-    the css property `'color: red'` for negative
-    strings, black otherwise.
-    """
-    color = 'red' if val < 0 else 'black'
-    return 'color: %s' % color
+
+def vconcat_resize(img_list, interpolation = cv2.INTER_CUBIC):
+    '''
+    Concatenate images of different widths vertically: It is used to 
+    combine images of different widths. here shape[0] represents height 
+    and shape[1] represents width
+
+    '''
+    # take minimum width
+    w_min = min(img.shape[1] 
+                for img in img_list)
+      
+    # resizing images
+    im_list_resize = [cv2.resize(img,
+                      (w_min, int(img.shape[0] * w_min / img.shape[1])),
+                                 interpolation = interpolation)
+                      for img in img_list]
+    # return final image
+    return cv2.vconcat(im_list_resize)
+
+def hconcat_resize(img_list, interpolation=cv2.INTER_CUBIC):
+    '''
+    Concatenate images of different heights horizontally: It is used to 
+    combine images of different heights. Here shape[0] represents height 
+    and shape[1] represents width.
+    '''
+    # Take minimum height
+    h_min = min(img.shape[0] for img in img_list)
+
+    # Resizing images
+    im_list_resize = [cv2.resize(img,
+                      (int(img.shape[1] * h_min / img.shape[0]), h_min),
+                                 interpolation=interpolation)
+                      for img in img_list]
+    
+    # Return final image
+    return cv2.hconcat(im_list_resize)
+
+
+def create_heamap1(df, width, height, annot_rot, title):
+    # Default values
+
+    # Set the size of the heatmap using figsize
+    fig, ax = plt.subplots(figsize=(width, height))  # Adjust the width and height as needed   
+    # Create a diverging color palette 
+    color_palette = sns.color_palette("coolwarm", as_cmap=True)
+    # Set upper and lower values
+    lower_bound = -1
+    upper_bound = 1
+    # Set the labels
+    labels = df.applymap(lambda v: v if v != 1 else '')
+    # Plot a heatmap with annotation
+    g = sns.heatmap(df,  
+                cmap=color_palette,
+                center = 0,
+                vmin=lower_bound, 
+                vmax=upper_bound,
+                annot=labels,
+                fmt='',
+                ax=ax,
+                linewidths=1.5,
+                annot_kws={'rotation': annot_rot})
+    # Set labels and title
+    ax.set_title(title, weight='bold')
+    # Rotate x names
+    g.set_xticklabels(g.get_xticklabels(), rotation=55, horizontalalignment='right')
+    # Save the heatmap as an image in the specified folder
+    output_filename = title + '.png'
+    plt.savefig(output_filename, dpi=300, bbox_inches='tight')
+    
+    return output_filename 
 
 
 
@@ -437,11 +782,13 @@ def color_negative_red(val):
 "###                                 Main                                    ###"
 "###############################################################################"
 
-def main(run_files=False, add_output=None, collect_kpi=False):
+def main(run_files=False, add_outputs=False, collect_kpi=False, verify = False):
     
     df_AH = None
     df_AC = None
-    final_df = None    
+    final_df = None  
+    df_topAH_comp = None 
+    df_topAT_comp = None
     
     '''
     Dictionaries
@@ -473,33 +820,101 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     
     enplus_vers = '(v22.2)'  #set the current En+ version
 
-
-
-
     #run this file in the root folder
     base_folder = os.getcwd()
+    weather_folder = base_folder + "\weather_files"
+    
+    enplusmodels85_thesis = r"#enplus_models\Models_8.5_Originals"
+    enplusmodels85_fixed = r"#enplus_models\Models_8.5_fixed"
+    enplusmodels22 = base_folder + r"\#enplus_models\Models22.2"
          
-    #create a folder to store the outputs
+    #create a folder to store the outputs images
     dir_images = 'images_outputs'   
     if not os.path.exists(dir_images):
         os.makedirs(dir_images)
         print("Directory '% s' created" % dir_images)
     else:
         print("Directory '% s' already exists" % dir_images)
+  
         
+   
+
+    
     '''
     Create first list (idf)
     '''
     
     #First of all create a list of all the file paths with an .idf extension
-    list_IDFs_found = search_extensions(base_folder, extension_file = '.idf')
+    list_IDFs_found = search_extensions(enplusmodels22, extension_file = '.idf')
+    list_old_idf = search_extensions(enplusmodels85_thesis, extension_file = '.idf')
+    list_fixed_idf = search_extensions(enplusmodels85_fixed, extension_file = '.idf')
+
     
+    '''
+    Verify all idf files
+    ''' 
+    # Initialize an empty DataFrame to store the results
+    data = {'Use': [],
+            'Orient': [],
+            'Glass': [],
+            'Storage': []}
     
+    old_df_verifyIDF = pd.DataFrame(data)
+    df_verifyIDF = pd.DataFrame(data)
+
+    
+    if verify== True:
+  
+        " Original models 8.5"
+        
+        title= r"images_outputs\Original_Models"
+        annot_rot=90
+        # Verify results of 8.5 thesis
+        for old_idf in list_old_idf:
+            
+            old_result = verifyIDF(old_idf, "8.5")
+            old_file_name = os.path.basename(old_idf).strip('.idf')
+            old_df_to_concat = pd.DataFrame({'Use':[old_result[0]], 'Version':[old_result[1]], 'Orient': [old_result[2]], 'Glass': [old_result[3]], 'Storage': [old_result[4]]}, index=[old_file_name])
+            old_df_verifyIDF = pd.concat([old_df_verifyIDF, old_df_to_concat])
+            old_df_verifyIDF.index.name = "ID_code"
+            
+        create_heamap1(old_df_verifyIDF.T, 150, 3, annot_rot, title)
+        old_df_verifyIDF.to_csv("csv_outputs\csv_8.5_thesis\v8.5_df_verifyIDF.csv",index=True)
+
+        " Fixed models 8.7"
+        
+        fixed_df_verifyIDF = pd.DataFrame(data)
+        title= r"images_outputs\Fixed_Models"
+        annot_rot=90
+        # Verify results of 8.5 thesis
+        for fix_idf in list_fixed_idf:
+            
+            fixed_result = verifyIDF(fix_idf, "8.5")
+            file_name = os.path.basename(fix_idf).strip('.idf')
+            fix_df_to_concat = pd.DataFrame({'Use':[fixed_result[0]], 'Version':[fixed_result[1]], 'Orient': [fixed_result[2]], 'Glass': [fixed_result[3]], 'Storage': [fixed_result[4]]}, index=[file_name])
+            fixed_df_verifyIDF = pd.concat([fixed_df_verifyIDF, fix_df_to_concat])
+            
+        create_heamap1(fixed_df_verifyIDF.T, 150, 3, annot_rot, title)
+        
+        " New version 22.2"
+        
+        # Iterate through the list of files and call verifyIDF for each file
+        for file_path in list_IDFs_found:
+            # Call the verifyIDF function and get the result (0 or 1)
+            result = verifyIDF(file_path, "22.2")   
+            # Extract the file name
+            file_name = os.path.basename(file_path).strip('.idf')
+            # Create a DataFrame for the current file and result
+            df_to_concat = pd.DataFrame({'Use':[result[0]], 'Version':[result[1]], 'Orient': [result[2]], 'Glass': [result[3]], 'Storage': [result[4]]}, index=[file_name])
+            # Append the result to the DataFrame
+            df_verifyIDF = pd.concat([df_verifyIDF, df_to_concat])
+
+
     '''
     add an output total cooling rate'
     '''
     
-    if add_output:
+    if add_outputs == True:
         
         #define the reference_string where you want to add a new output_line
         reference_string = "Zone Ideal Loads Zone Sensible Heating Rate"
@@ -509,31 +924,31 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         for path_idf in list_IDFs_found:
             
             add_output(path_idf, reference_string, output_line)
-
-    
+            
+            
     '''
     run all idf files
     ''' 
-    if run_files:
+    if run_files == True:
         
         #set the iddfile path 
-        iddfile = iddfile = os.path.join(base_folder, 'Energy+.idd')
+        iddfile = os.path.join(base_folder, 'Energy+.idd')
         
-        os.chdir(r'#enplus_models')
+        os.chdir(enplusmodels22)
         
         #choose to run with palermo or bolzano weater file
         for idf_file in list_IDFs_found:
             
             #if the string BOLZANO in the line
-            if 'BOLZANO' in idf_file:
+            if 'L2' in idf_file:
                 #Run all the idf files with the run function with the right epw
-                epwfile = os.path.join(base_folder,"ITA_Bolzano.160200_IGDG.epw")
+                epwfile = os.path.join(weather_folder,"ITA_Bolzano.160200_IGDG.epw")
                 Run_idf(idf_file, iddfile, epwfile)
             
             #else if there's PALERMO
             else:
                 #Run all the idf files with the run funtion with the right epw
-                epwfile = os.path.join(base_folder,"ITA_Palermo.164050_IWEC.epw")
+                epwfile = os.path.join(weather_folder,"ITA_Palermo.164050_IWEC.epw")
                 Run_idf(idf_file, iddfile, epwfile)
             
             os.chdir(base_folder)
@@ -543,13 +958,90 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     Create second list (eso)
     ''' 
     #Create a list of all .eso files generated with the Run_idf function    
-    list_ESOs_found = search_extensions(base_folder, extension_file = '.eso') 
+    list_ESOs_found = search_extensions(enplusmodels22, extension_file = '.eso') 
     
     
     '''
     KPI section
     ''' 
-    if collect_kpi:
+    if collect_kpi == True:
+        
+        " Model 8.7 fixed"
+     
+        files_fixed = r"#enplus_models\Models_8.5_fixed"    
+        fixed_list_html_found =  search_extensions(files_fixed, extension_file = '.htm')
+        thesis_fixed_df = pd.DataFrame()
+        
+        for file in  fixed_list_html_found:
+            
+            html = pd.read_html(file)
+            # Get the folder containing the specified file
+            folder_name = os.path.dirname(file)
+            # Get the name of the last directory
+            name = os.path.basename(folder_name)
+            
+            # COLLECT KPI
+            # Open the table with district heating and coolig
+            district_table = html[3]
+            AC_value = district_table.at[2,4]
+            AH_value = district_table.at[1,5]
+            series = pd.DataFrame({'AC(v8.7)':[AC_value], 'AH(v8.7)': [AH_value]}, index=[name])
+            thesis_fixed_df = pd.concat([thesis_fixed_df, series])
+            thesis_fixed_df.index.name= "ID_code"
+            
+        thesis_fixed_df.to_csv(r"csv_outputs\csv_8.7_fixed\annual8.7_fixed_thesis.csv", index=True)
+        
+        '''
+        Section: Thesis
+        ''' 
+        folder_files = r"#enplus_models\Models_8.5_Originals"    
+        thesis_list_html_found =  search_extensions(folder_files, extension_file = '.html')
+        thesis_df = pd.DataFrame()
+        
+        for file in  thesis_list_html_found:
+            
+            html = pd.read_html(file)
+            # Get the folder containing the specified file
+            folder_name = os.path.dirname(file)
+            # Get the name of the last directory
+            name = os.path.basename(folder_name)
+            
+            # COLLECT KPI
+            # Open the table with district heating and coolig
+            district_table = html[3]
+            AC_value = district_table.at[2,4]
+            AH_value = district_table.at[1,5]
+            series = pd.DataFrame({'AC_thesis':[AC_value], 'AH_thesis': [AH_value]}, index=[name])
+            thesis_df = pd.concat([thesis_df, series])
+            thesis_df.index.name= "ID_code"
+            
+        thesis_df.to_csv(r"csv_outputs\csv_8.5_thesis\annual8.5_old_python.csv", index=True)
+        
+        
+        " Model 22.2"
+        
+        # folder_files = r"#enplus_models\Models22.2"    
+        # latest_list_html_found =  search_extensions(folder_files, extension_file = '.htm')
+        # version_22_df = pd.DataFrame()
+        
+        # for file in  latest_list_html_found:
+            
+        #     html = pd.read_html(file)
+        #     # Get the folder containing the specified file
+        #     folder_name = os.path.dirname(file)
+        #     # Get the name of the last directory
+        #     name = os.path.basename(folder_name)
+            
+        #     # COLLECT KPI
+        #     # Open the table with district heating and coolig
+        #     district_table = html[3]
+        #     AC_value = district_table.at[2,11]
+        #     AH_value = district_table.at[1,12]
+        #     series = pd.DataFrame({'AC(v22.2)':[AC_value], 'AH(v22.2)': [AH_value]}, index=[name])
+        #     version_22_df = pd.concat([version_22_df, series])
+        #     version_22_df.index.name= "ID_code"
+            
+        # version_22_df.to_csv(r"csv_outputs\annual22.2.csv", index=True)
         
         'cooling' 
         # Create an empty dictonary
@@ -591,7 +1083,8 @@ def main(run_files=False, add_output=None, collect_kpi=False):
             df_AH = pd.DataFrame.from_dict(AH, orient='index', columns=['AH'+ enplus_vers])
             df_AH = df_AH.rename_axis('ID_code', axis='index')
         
-        # Export df in an output folder  
+        ' Export df in an output folder'
+        
         os.chdir(base_folder)        
         #create a folder to store the outputs
         dir_csv = 'csv_outputs'      
@@ -611,50 +1104,82 @@ def main(run_files=False, add_output=None, collect_kpi=False):
         #return to the current dir
         os.chdir(base_folder)
         
-
     
-      
     
     '''
     Comparison step
     '''
     
-    ' final_df'
-    
+    " Old results of 8.5"
     #read the old thesis results and create a  df
-    old = pd.read_excel('OLD_total.xlsx', index_col='ID_code')
-    # redo the diff %
-    old = old.drop('diff%_AH(v8.9)', axis=1)
-    old = old.drop('diff%_AT(v8.9)', axis=1)
-    old2 = calculate_percentage_diff(old, 'AH(v8.9)')
-    old2 = calculate_percentage_diff(old2, 'AT(v8.9)')
-     
-    #clean the new df with all results and leave only total consumptions
-    os.chdir('csv_outputs')
+    old_85_file = r"C:\Users\andre\Desktop\Week1\Thesis_Python-main\csv_outputs\csv_8.5_thesis\annual8.5_old_python.csv"
+    old_85 = pd.read_csv(old_85_file, index_col='ID_code')
+    # Add AT
+    old_85["AT(v8.5_old_py)"] = old_85["AC(v8.5_old_py)"] + old_85["AH(v8.5_old_py)"]
+    # Calculate the difference from base case
+    old_85 = calculate_percentage_diff(old_85, 'AC(v8.5_old_py)')
+    old_85 = calculate_percentage_diff(old_85, 'AH(v8.5_old_py)')
+    old_85 = calculate_percentage_diff(old_85, 'AT(v8.5_old_py)')
     
-    new_H = pd.read_csv(f'AH{enplus_vers}.csv', index_col='ID_code')
-    new_T = pd.read_csv(f'AT{enplus_vers}.csv', index_col='ID_code')
-    # Create a df with 2 columns
-    new_HT = new_H.join(new_T)
-    # Add the column diff % on the right of the selected column
-    new_HT_diff = calculate_percentage_diff(new_HT, col_name='AH'+ enplus_vers)
-    new_HT_diff = calculate_percentage_diff(new_HT_diff, col_name='AT'+ enplus_vers)
+    " New results of 8.7"
+    #read the new thesis results and create a df
+    new_85_file = r"C:\Users\andre\Desktop\Week1\Thesis_Python-main\csv_outputs\csv_8.7_fixed\annual8.7_fixed_thesis.csv"
+    new_85 = pd.read_csv(new_85_file, index_col='ID_code')
+    # Add AT
+    new_85["AT(v8.7)"] = new_85["AC(v8.7)"] + new_85["AH(v8.7)"]
+    # Calculate the difference from base case
+    new_85 = calculate_percentage_diff(new_85, 'AC(v8.7)')
+    new_85 = calculate_percentage_diff(new_85, 'AH(v8.7)')
+    new_85 = calculate_percentage_diff(new_85, 'AT(v8.7)')
+    
+    " Confronto risultati tesi con risultati corretti 8.5"
+    df_comparison = pd.concat([old_85, new_85], axis=1)
+    # Annual Cooling
+    df_comparison['Delta_AC%_(v8.5-8.7_new)'] = round((df_comparison['AC(v8.5_old_py)'] - df_comparison['AC(v8.7)'])/ df_comparison['AC(v8.7)'] *100, 2)    # Calculate the %diff   
+    # Annual Heating
+    df_comparison['Delta_AH%_(v8.5-8.7_new)'] = round((df_comparison['AH(v8.5_old_py)'] - df_comparison['AH(v8.7)'])/ df_comparison['AH(v8.7)'] *100, 2)    # Calculate the %diff
+    # Annual Total
+    df_comparison['Delta_AT%_(v8.5-8.7_new)'] = round((df_comparison['AT(v8.5_old_py)'] - df_comparison['AT(v8.7)'])/ df_comparison['AT(v8.7)'] *100, 2)    # Calculate the %diff
+    
+    " Results of 22.2"
 
-    # Now create a big df with all
-    final_df = old2.join(new_HT_diff)
+    os.chdir('csv_outputs')
+    # new_C = pd.read_csv(f'AC{enplus_vers}.csv', index_col='ID_code')
+    # new_H = pd.read_csv(f'AH{enplus_vers}.csv', index_col='ID_code')
+    # new_T = pd.read_csv(f'AT{enplus_vers}.csv', index_col='ID_code')
+    
+    # # Create a df with 2 columns
+    # new_CHT = pd.concat([new_C,new_H,new_T],axis=1)
+    
+    new_CHT = pd.read_excel('annual22.2.xlsx', index_col='ID_code')
+    # Add the column diff % on the right of the selected column
+    new_CHT = calculate_percentage_diff(new_CHT, col_name='AC'+ enplus_vers)
+    new_CHT = calculate_percentage_diff(new_CHT, col_name='AH'+ enplus_vers)
+    new_CHT = calculate_percentage_diff(new_CHT, col_name='AT'+ enplus_vers)
+
+    " Final dataframe with all"
+    final_df = pd.concat([old_85, new_85, new_CHT],axis=1)
   
-    #add a new column to final_df with the delta from v8.9 to 22.2
+    #add a new column to final_df with the delta AH from v8.7 to 22.2
     #Differenza percentuale = [(Nuovo valore - Vecchio valore) / Vecchio valore] * 100 (la ref è vecchio val)
-    final_df['Delta(v22.2-8.9)'] = final_df['AT(v22.2)'] - final_df['AT(v8.9)']
-    final_df['Delta_%_(v22.2-8.9)'] = round((final_df['Delta(v22.2-8.9)'])/ final_df['AT(v8.9)'] *100, 2)    # Calculate the %diff
-    # Create ranking columns
-    final_df['rank_8.9'] =   final_df['AT(v8.9)'].rank(ascending=True)
-    final_df['rank_22.2'] =   final_df['AT(v22.2)'].rank(ascending=True)
-    final_df['delta_rank_22.2-8.9'] = final_df['rank_22.2'] - final_df['rank_8.9']
+    
+    # Annual Cooling
+    final_df['Delta_AC%_(v22.2-8.7_new)'] = round((final_df['AC(v22.2)'] - final_df['AC(v8.7)'])/ final_df['AC(v8.7)'] *100, 2)    # Calculate the %diff   
+    # Annual Heating
+    final_df['Delta_AH%_(v22.2-8.7_new)'] = round((final_df['AH(v22.2)'] - final_df['AH(v8.7)'])/ final_df['AH(v8.7)'] *100, 2)    # Calculate the %diff
+    # Annual Total
+    final_df['Delta_AT%_(v22.2-8.7_new)'] = round((final_df['AT(v22.2)'] - final_df['AT(v8.7)'])/ final_df['AT(v8.7)'] *100, 2)    # Calculate the %diff
+    
+    # # Create ranking columns
+    # final_df['rank_8.7'] =   final_df['AT(v8.7)'].rank(ascending=True)
+    # final_df['rank_22.2'] =   final_df['AT(v22.2)'].rank(ascending=True)
+    # # Compare the rank
+    # final_df['delta_rank_22.2-8.7'] = final_df['rank_22.2'] - final_df['rank_8.7']   
+    final_df.to_csv('final_df.csv')
   
     
   
-    ' 4 main dfs from the final_df'
+    ' Initialise 4 main dfs from the final_df'
     # Create four DataFrames from final_df and store them in a dictionary
     four_df = {
             'O_L1': final_df.filter(like="O_L1", axis=0),
@@ -663,10 +1188,9 @@ def main(run_files=False, add_output=None, collect_kpi=False):
             'R_L2': final_df.filter(like="R_L2", axis=0),
             }
    
-
+   
+    ' Ranking best solutions'
     
-    
-    ' Ranking solutions'
     #save the dfs as images in the right folder
     os.chdir(base_folder)
     os.chdir(dir_images)
@@ -674,116 +1198,98 @@ def main(run_files=False, add_output=None, collect_kpi=False):
     # Create an empty dictionary to store the results
     results_dfs = {}
     
+    # Rank best solutions for AH and AT. You will have 8 dataframes
     for df_name, df in four_df.items():
         # Define the prefixes for AH and AT
         prefixes = ['AH', 'AT']
         
+        # For each of the four dfs analyse AH and AT
         for prefix in prefixes:
-            old_df = rank_values(df, f'diff%_{prefix}(v8.9)', 5, f'{prefix}(v8.9)', f'diff%_{prefix}(v8.9)')
+            old_df = rank_values(df, f'diff%_{prefix}(v8.7)', 5, f'{prefix}(v8.7)', f'diff%_{prefix}(v8.7)')
             new_df = rank_values(df, f'diff%_{prefix}(v22.2)', 5, f'{prefix}(v22.2)', f'diff%_{prefix}(v22.2)')
             
-            df_comp = compare_df(old_df, new_df, 8.9, 22.2)
+            df_comp = compare_df(old_df, new_df, 8.7, 22.2)
             
-            delta_col = f'Delta_%_(v22.2-8.9)'
-            df_comp[delta_col] = round((df_comp[f'{prefix}(v22.2)'] - df_comp[f'{prefix}(v8.9)']) / df_comp[f'{prefix}(v8.9)'] * 100, 2)
+            delta_col = f'Delta_{prefix}%_(v22.2-8.7)'
+            df_comp[delta_col] = round((df_comp[f'{prefix}(v22.2)'] - df_comp[f'{prefix}(v8.7)']) / df_comp[f'{prefix}(v8.7)'] * 100, 2)
             
             # Store the results in the dictionary using df_name and prefix as keys
             results_dfs[f'top{prefix}_{df_name}'] = df_comp
        
-            # You can access the results later like this:
-            # results_dfs['AH_O_L1'] will give you the AH results for O_L1
-            # If you want to access a specific column within the DataFrame stored in 'AH_O_L1', you can use normal DataFrame indexing
-            # delta_value = results['AH_O_L1']['Delta_%_(v22.2-8.9)']
+        # You can access the results later like this:
+        # results_dfs['AH_O_L1'] will give you the AH results for O_L1
+        # If you want to access a specific column within the DataFrame stored in 'topAH_O_L1', you can use normal DataFrame indexing
+        # delta_value = results['AH_O_L1']['Delta_AT%_(v22.2-8.7)']
             
             # Set the index starting from 1
             df_comp.index = range(1, len(df_comp) + 1)
             # Save the df as image
             dfi.export(df_comp, f'top{prefix}_{df_name}.png', dpi=300)
+    
+    ' Merge all the tables in one and delete the originals '
+   
+    img_list=[]
+    # Concatenate ".png" to each key and create a list
+    table_names = [key + ".png" for key in results_dfs.keys()]
+    for img in table_names:
+        imread = cv2.imread(img)
+        # Append in the list of images
+        img_list.append(imread)
+    
+    # function calling      
+    img_v_resize = vconcat_resize(img_list)
+    
+    # Save only the concatenated image
+    cv2.imwrite('vconcat_tables.png', img_v_resize)
 
+    # Delete the original files
+    for img in table_names:
+        os.remove(img)
+               
+    ' Rank range'
+    rank_range = {}
+    # All values in '{column_name}' that are less than or equal to {range_value} units from the min 
+    for df_name, df in four_df.items():
+        range_df = rank_with_range(df, column_name='diff%_AT(v22.2)', range_value=3)
+        rank_range[f'range_{df_name}'] = range_df
     
  
+    ' Create Heatmaps'
     
+    # Comparison of 8.7 thesis    
+    title = "8.7_comparison"
+    annot_rot = 90
+
+    # # Trim the df with only the rows containing the distance %. Function FILTER
+    # df0 = df_comparison.filter(like='Delta', axis=1)
+    # df0_verified = pd.read_csv(r"C:\Users\andre\Desktop\Week1\Thesis_Python-main\csv_outputs\csv_8.7_thesis\v8.7_df_verifyIDF.csv", index_col="ID_code") 
+    # df_verify_heatmap = df0_verified.join(df0)
+    # df_verify_heatmap.T
+    # create_heamap1(df_verify_heatmap.T, 150, 5, annot_rot, title) 
     
-    ' Create the .html'
- 
-    # Define the CSS styles for index and column names highlighting
-    header_style = [
-        {
-            "selector": "th",
-            "props": [("font-weight", "bold"), ("background-color", "#b2b2b2")]
-        },
-        {
-            "selector": "th.index_name",
-            "props": [("font-weight", "bold"), ("background-color", "#b2b2b2")]
-        }
-    ]
-  
-    styled_df = final_df.style.set_caption("En+ comparison table", ) 
-    styled_df = styled_df.background_gradient(subset=['Delta_%_(v22.2-8.9)'], cmap='RdYlGn')
-    # Apply precision to specific columns 
-    styled_df = styled_df.format({'AH(v8.9)': '{:.1f}',
-                                  'diff%_AH(v8.9)': '{:.2f}',
-                                  'AT(v8.9)': '{:.1f}',
-                                  'diff%_AT(v8.9)': '{:.2f}',
-                                  'AH(v22.2)': '{:.1f}',
-                                  'diff%_AH(v22.2)': '{:.2f}',
-                                  'AT(v22.2)': '{:.1f}',
-                                  'diff%_AT(v22.2)': '{:.2f}',
-                                  'Delta(v22.2-8.9)': '{:.1f}',
-                                  'Delta_%_(v22.2-8.9)': '{:.2f}',
-                                  'rank_8.9': '{:.0f}',
-                                  'rank_22.2': '{:.0f}',
-                                  'delta_rank_22.2-8.9': '{:.0f}'}) 
-    # Apply the header styles to the DataFrame
-    styled_df = styled_df.set_table_styles(header_style)      
-    # Convert the styled DataFrame to HTML representation
-    html = styled_df.to_html() 
-    # Save the HTML representation to a file
-    with open("styled_df.html", "w") as fp:
-        fp.write(html)
-        
-        
-        
-    
-    '4 main dfs from the final_df as heatmaps'
+    # For each of the 4 main dfs create an heatmap of AH, AC AT
     for df_name, df in four_df.items():
         
-        # Transpose the df to exchange x and y
-        transposed_df = df.T
+        title = df_name
+        annot_rot = 90
+    
         # Trim the df with only the rows containing the distance %. Function FILTER
-        transposed_df = transposed_df.filter(like='Delta_%_(v22.2-8.9)', axis=0)
-        # Set the size of the heatmap using figsize
-        fig, ax = plt.subplots(figsize=(40, 2))  # Adjust the width and height as needed   
-        # Create a diverging color palette 
-        color_palette = sns.color_palette("coolwarm", as_cmap=True)
-        # Plot a heatmap with annotation
-        sns.heatmap(transposed_df,  
-                    cmap=color_palette,
-                    center = 0,
-                    annot=True,
-                    fmt='',
-                    ax=ax,
-                    linewidths=1.5,
-                    annot_kws={'rotation': 90})
-        # Set labels and title
-        ax.set_title(f'{df_name}', weight='bold')
-        # Save the heatmap as an image in the specified folder
-        output_filename = f'{df_name}.png'
-        plt.savefig(output_filename, dpi=300, bbox_inches='tight')
-        
-        # Display the heatmap
-        plt.show()
-        
+        df1 = df.filter(like='%_(v22.2-8.7_new)', axis=1)
+        # Df for debugging filtered by use and location
 
+        df1.T
+        create_heamap1(df1.T, 50, 5, annot_rot, title) 
+    
 
-    return df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp
+    return df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp, results_dfs, rank_range, df_verifyIDF
 
     
 if __name__  == "__main__" :
-    df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp = main()
+    df_AH, df_AC, final_df, df_topAH_comp, df_topAT_comp, results_dfs, rank_range, df_verifyIDF = main()
     
 
-    
-  
-    
+
+
+          
+
    
